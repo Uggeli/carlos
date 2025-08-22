@@ -1,0 +1,14 @@
+services:
+  mongo:
+    image: mongo:7
+    container_name: carlos_mongo
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongo_data:/data/db
+# No auth for local dev; update README/.env if enabling auth
+# environment:
+#   MONGO_INITDB_ROOT_USERNAME: root
+#   MONGO_INITDB_ROOT_PASSWORD: example
+volumes:
+  mongo_data:
