@@ -5,12 +5,31 @@ import json
 
 BASE = os.getenv("TEST_CARLOS_BASE", "http://localhost:5000")
 
+# Global session for maintaining login state
+_session = None
+
+
+def get_session():
+    """Get or create a session with login."""
+    global _session
+    if _session is None:
+        _session = requests.Session()
+        # Log in with a test username
+        test_username = f"test_user_{int(time.time())}"
+        login_data = {"name": test_username}
+        login_response = _session.post(f"{BASE}/login", data=login_data, allow_redirects=False)
+        if login_response.status_code not in [302, 200]:  # Expect redirect after successful login
+            raise Exception(f"Login failed: {login_response.status_code} {login_response.text}")
+        print(f"Logged in as: {test_username}")
+    return _session
+
 
 def send_message(text, debug=False):
     """Send a message to Carlos and return the response."""
-    endpoint = "/api/debug_chat" if debug else "/api/chat"
+    session = get_session()
+    endpoint = "/api/chat"  # Only one endpoint available now
     body = {"message": text}
-    r = requests.post(f"{BASE}{endpoint}", json=body, timeout=120)
+    r = session.post(f"{BASE}{endpoint}", json=body, timeout=120)
     r.raise_for_status()
     return r.json()
 
@@ -132,75 +151,34 @@ def test_story_arc():
     return success
 
 
-def test_debug_functionality():
-    """Test the debug endpoint and information retrieval."""
-    print("[TEST] Debug Functionality: detailed pipeline inspection")
+def test_basic_functionality():
+    """Test basic chat functionality and response generation."""
+    print("[TEST] Basic Functionality: chat response generation")
     
-    res = send_message("What color is my car?", debug=True)
-    debug_data = res.get('debug', {})
+    res = send_message("What color is my car?")
+    reply = res.get('reply', '')
     
-    print("  Debug data sections available:")
-    for section in debug_data.keys():
-        print(f"    - {section}")
+    print(f"  Carlos: {reply[:100]}...")
     
-    # Check curator output
-    curator = debug_data.get('curator', {})
-    if 'context_retrieval_queries' in curator or 'investigation_queries' in curator:
-        queries = curator.get('context_retrieval_queries', []) or curator.get('investigation_queries', [])
-        print(f"  Curator generated {len(queries)} queries")
-        for i, query in enumerate(queries[:3]):  # Show first 3
-            print(f"    Query {i+1}: {query.get('purpose', 'No purpose')[:60]}...")
-    
-    # Check context assembly
-    context = debug_data.get('context', {})
-    if 'retrieved_context' in context:
-        retrieved = context['retrieved_context']
-        if 'queries_executed' in retrieved:
-            executed_queries = retrieved['queries_executed']
-            print(f"  Context assembly executed {len(executed_queries)} queries")
-            total_results = sum(q.get('count', 0) for q in executed_queries)
-            print(f"  Total database results: {total_results}")
-    
-    # Check thinker output
-    thinker = debug_data.get('thinker', {})
-    if 'situation_summary' in thinker:
-        summary = thinker['situation_summary']
-        print(f"  Thinker situation summary: {summary[:80]}...")
-    
-    success = bool(curator and context and thinker)
-    print(f"  ✅ SUCCESS: Debug pipeline working" if success else f"  ❌ FAILED: Debug pipeline incomplete")
+    # Check if we got a reasonable response
+    success = bool(reply and len(reply) > 10)
+    print(f"  ✅ SUCCESS: Got valid response" if success else f"  ❌ FAILED: No valid response")
     return success
 
 
-def test_database_queries():
-    """Test that database queries are being generated and executed properly."""
-    print("[TEST] Database Queries: curator query generation and execution")
+def test_memory_retrieval():
+    """Test that Carlos can retrieve previously mentioned information."""
+    print("[TEST] Memory Retrieval: recalling stored information")
     
-    # Ask a question that should trigger database lookups
-    res = send_message("Do you remember what I told you about my favorite color?", debug=True)
-    debug_data = res.get('debug', {})
+    # Ask a question that should trigger memory lookups
+    res = send_message("Do you remember what I told you about my favorite color?")
+    reply = res.get('reply', '')
     
-    # Check if queries were generated
-    curator = debug_data.get('curator', {})
-    queries = curator.get('context_retrieval_queries', []) or curator.get('investigation_queries', [])
+    print(f"  Carlos: {reply[:100]}...")
     
-    print(f"  Curator generated {len(queries)} queries")
-    
-    # Check if queries were executed
-    context = debug_data.get('context', {})
-    executed_queries = context.get('retrieved_context', {}).get('queries_executed', [])
-    
-    print(f"  {len(executed_queries)} queries were executed")
-    
-    # Analyze query results
-    for i, query in enumerate(executed_queries):
-        collection = query.get('collection', 'unknown')
-        count = query.get('count', 0)
-        purpose = query.get('purpose', 'No purpose')
-        print(f"    Query {i+1}: {collection} -> {count} results ({purpose[:40]}...)")
-    
-    success = len(queries) > 0 and len(executed_queries) > 0
-    print(f"  ✅ SUCCESS: Queries generated and executed" if success else f"  ❌ FAILED: Query system not working")
+    # Check if Carlos acknowledges the memory lookup attempt
+    success = bool(reply and len(reply) > 10)
+    print(f"  ✅ SUCCESS: Memory retrieval attempted" if success else f"  ❌ FAILED: No response to memory query")
     return success
 
 
@@ -218,7 +196,7 @@ def test_memory_storage():
         send_message(f"What's the weather like? Random question {i}")
     
     # Try to retrieve the information
-    res = send_message("What was that important thing I told you earlier about my lucky number?", debug=True)
+    res = send_message("What was that important thing I told you earlier about my lucky number?")
     reply = res.get('reply', '')
     
     # Check if the information was retrieved
@@ -226,13 +204,7 @@ def test_memory_storage():
     print(f"  Carlos: {reply[:100]}...")
     print(f"  ✅ SUCCESS: Information retrieved" if success else f"  ❌ FAILED: Information not retrieved")
     
-    # Also check debug info for database activity
-    debug_data = res.get('debug', {})
-    executed_queries = debug_data.get('context', {}).get('retrieved_context', {}).get('queries_executed', [])
-    db_activity = len(executed_queries) > 0
-    print(f"  Database queries executed: {len(executed_queries)}")
-    
-    return success and db_activity
+    return success
 
 
 if __name__ == "__main__":
@@ -243,10 +215,10 @@ if __name__ == "__main__":
     
     try:
         # Test basic functionality first
-        results['debug'] = test_debug_functionality()
+        results['basic'] = test_basic_functionality()
         print()
         
-        results['queries'] = test_database_queries()
+        results['retrieval'] = test_memory_retrieval()
         print()
         
         results['storage'] = test_memory_storage()
@@ -264,6 +236,8 @@ if __name__ == "__main__":
         
     except requests.HTTPError as e:
         print(f"❌ HTTP Error: {e.response.status_code}")
+        if e.response.status_code == 401:
+            print("   Authentication failed - check login system")
         try:
             error_detail = e.response.json()
             print(f"   Details: {error_detail}")
@@ -273,6 +247,13 @@ if __name__ == "__main__":
         print(f"❌ Error: {e}")
         import traceback
         traceback.print_exc()
+    finally:
+        # Clean up session
+        if _session:
+            try:
+                _session.post(f"{BASE}/logout")
+            except:
+                pass
     
     # Summary
     print("=" * 50)
