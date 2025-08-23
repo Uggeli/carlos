@@ -313,22 +313,33 @@ class CarlosDatabaseHandler:
                 context_results[purpose] = []
 
             if context_results[purpose] is None:
-                context_results[purpose] = 'No results found'
-
-        # Ensure all fields are json serializable
-        for purpose, results in context_results.items():
-            if isinstance(results, list):
-                for doc in results:
-                    if '_id' in doc:
-                        doc['_id'] = str(doc['_id'])
-            elif isinstance(results, dict) and '_id' in results:
-                results['_id'] = str(results['_id'])
-            elif isinstance(results, ObjectId):
-                context_results[purpose] = str(results)
-            elif isinstance(results, datetime):
-                context_results[purpose] = results.isoformat()
-                    
+                context_results[purpose] = 'No results found'                
         return context_results
+    
+    def retrieve_from_conversations(self, entities: List[str], semantic_tags: List[str], timeframe: str = "recent", limit: int = 5) -> List[Dict[str, Any]]:
+        """Retrieve relevant conversations based on entities, semantic tags, and timeframe."""
+        collection = self.get_collection("conversations")
+        query = {"user_id": self.username}
+
+        if entities:
+            query["entities"] = {"$in": entities}
+        if semantic_tags:
+            query["semantic_tags"] = {"$in": semantic_tags}
+        
+        if timeframe and timeframe not in ["all", "all_time"]:
+            timeframe_query = self._get_timeframe_query(timeframe)
+            if "timestamp" in timeframe_query:
+                query.update(timeframe_query)
+
+        try:
+            cursor = collection.find(query)
+            cursor = cursor.sort("timestamp", DESCENDING).limit(limit)
+            results = list(cursor)
+            logger.info(f"Retrieved {len(results)} conversations matching criteria")
+            return results
+        except Exception as e:
+            logger.error(f"Error retrieving conversations: {e}")
+            return []
 
 class CuratorHandler:
     """Orchestrates interaction between curator output and database."""
@@ -350,6 +361,17 @@ class CuratorHandler:
             retrieved_context = self.db_handler.retrieve_context(curator_output["context_retrieval_queries"])
 
         return retrieved_context
+
+class MongoJSONEncoder(json.JSONEncoder):
+    """
+    JSONEncoder subclass that handles ObjectId and datetime objects.
+    """
+    def default(self, o):
+        if isinstance(o, ObjectId):
+            return str(o)
+        if isinstance(o, datetime):
+            return o.isoformat()
+        return super().default(o)
 
 class Carlos:
     """Carlos is a conversational AI system that interacts with users, processes messages, and retrieves information from a MongoDB database."""
@@ -422,10 +444,18 @@ class Carlos:
             "context_retrieval_queries": context_retrieval_queries,
         })
 
+        from_conversations = self.db_handler.retrieve_from_conversations(
+            entities=handler_output.get("entities", []),
+            semantic_tags=handler_output.get("semantic_tags", []),
+            timeframe="recent",
+            limit=5
+        )
+        
         return {
             "context_focus": context_focus,
             "curiosity_analysis": curiosity_analysis,
-            "retrieved_context": handler_output
+            "retrieved_context": handler_output,
+            "from_conversations": from_conversations
         }
     
     def _think(self, message: str, curator_analysis: dict) -> tuple[dict[str, Any], bool]:
@@ -434,7 +464,7 @@ class Carlos:
             "model": "carlos",
             "messages": [
                 {"role": "system", "content": self.thinker_system_prompt},
-                {"role": "system", "content": "Curator data: " + json.dumps(curator_analysis)},
+                {"role": "system", "content": "Curator data: " + json.dumps(curator_analysis, cls=MongoJSONEncoder)},
                 {"role": "user", "content": f"Orginal user message: {message}"}
             ],
             "response_format": self.thinker_schema,
@@ -452,12 +482,13 @@ class Carlos:
             return {}, False
         return think_data, False  # Flag lets add rethinking logic later
     
-    def _build_response(self, think_data: dict[str, Any], message: str) -> str:
+    def _build_response(self, think_data: dict[str, Any], message: str, timestamp: str) -> str:
         response_message = {
             "model": "carlos",
             "messages": [
                 {"role": "system", "content": self.response_generator_system_prompt},
-                {"role": "system", "content": "Thinker data: " + json.dumps(think_data)},
+                {"role": "system", "content": "Thinker data: " + json.dumps(think_data, cls=MongoJSONEncoder)},
+                {"role": "system", "content": f"Current time is {timestamp}"},
                 {"role": "user", "content": f"Original user message: {message}"}
             ],
             "response_format": self.response_generator_schema,
@@ -483,6 +514,47 @@ class Carlos:
         context_focus = curator_analysis.get("context_focus", {})
         curiosity_analysis = curator_analysis.get("curiosity_analysis", {})
         return fresh_data_to_store, context_retrieval_queries, context_focus, curiosity_analysis
+    
+    def _process_big_input(self, message: str) -> dict[str, Any]:
+        """Split big input into smaller chunks if needed."""
+        max_chunk_size = 2000
+        if len(message) <= max_chunk_size:
+            return self._curate(message)
+        # Split by sentences for better coherence
+        sentences = re.split(r'(?<=[.!?]) +', message)
+        chunks = []
+        current_chunk = ""
+        for sentence in sentences:
+            if len(current_chunk) + len(sentence) + 1 <= max_chunk_size:
+                current_chunk += (" " if current_chunk else "") + sentence
+            else:
+                if current_chunk:
+                    chunks.append(current_chunk)
+                current_chunk = sentence
+        if current_chunk:
+            chunks.append(current_chunk)
+        combined_analysis = {
+            "context_focus": {},
+            "curiosity_analysis": {},
+            "retrieved_context": {
+                "entities": [],
+                "semantic_tags": []
+            }
+        }
+
+        for chunk in chunks:
+            chunk_analysis = self._curate(chunk)
+            # Combine retrieved context
+            for key in ["entities", "semantic_tags"]:
+                combined_analysis["retrieved_context"][key].extend(chunk_analysis.get("retrieved_context", {}).get(key, []))
+            # Merge context_focus and curiosity_analysis (simple overwrite for now)
+            combined_analysis["context_focus"].update(chunk_analysis.get("context_focus", {}))
+            combined_analysis["curiosity_analysis"].update(chunk_analysis.get("curiosity_analysis", {}))
+
+        # Deduplicate entities and semantic tags
+        combined_analysis["retrieved_context"]["entities"] = list(set(combined_analysis["retrieved_context"]["entities"]))
+        combined_analysis["retrieved_context"]["semantic_tags"] = list(set(combined_analysis["retrieved_context"]["semantic_tags"]))
+        return combined_analysis
 
     def chat(self, message: str) -> str:
         """Process a chat message and return a response."""
@@ -491,13 +563,13 @@ class Carlos:
         message += f" [{timestamp}]"
         message += f" [username: {self.username}]"
 
-        curator_analysis = self._curate(message)
+        curator_analysis = self._process_big_input(message)
         think_data, needs_curator = self._think(message, curator_analysis)
         if needs_curator:
             logger.info("Rethinking required, querying curator again...")
             # fire up curator again with thinker data
 
-        response_text = self._build_response(think_data, message)
+        response_text = self._build_response(think_data, message, timestamp)
         # Store the conversation turn
         self.db_handler.store_conversation(
             user_input=message,
