@@ -161,13 +161,17 @@ class CarlosDatabaseHandler:
         return {"timestamp": time_query} if time_query else {}
 
     def _expand_query(self, query: Dict[str, Any]) -> Dict[str, Any]:
-        """Recursively expand query using ENUM_MAPS."""
+        """Recursively expand query using ENUM_MAPS and handle nested fields."""
         expanded_query = {}
         for field, value in query.items():
             if isinstance(value, dict):
                 expanded_query[field] = self._expand_query(value)
             elif field in self.ENUM_MAPS and value in self.ENUM_MAPS[field]:
                 expanded_query[field] = {"$in": self.ENUM_MAPS[field][value]}
+            # Handle nested user_state queries
+            elif field == "travel_history" and isinstance(value, str):
+                # Convert to array contains query
+                expanded_query[f"travel_history.{value}"] = {"$exists": True}
             else:
                 expanded_query[field] = value
         return expanded_query
@@ -217,32 +221,46 @@ class CarlosDatabaseHandler:
             collection = self.get_collection("user_state")
             update_payload = {}
 
-            # Handle user_state_updates (e.g., mood, context_flags)
+            # Handle user_state_updates with nested structure support
             if "user_state_updates" in fresh_data and fresh_data["user_state_updates"]:
-                update_payload.update(fresh_data["user_state_updates"])
+                for key, value in fresh_data["user_state_updates"].items():
+                    if key == "context_flags" and isinstance(value, list):
+                        # Append to existing flags array
+                        update_payload.setdefault("$addToSet", {})["context_flags"] = {"$each": value}
+                    elif key in ["active_projects", "preferences"] and isinstance(value, dict):
+                        # Merge nested objects
+                        for subkey, subvalue in value.items():
+                            update_payload[f"{key}.{subkey}"] = subvalue
+                    else:
+                        update_payload[key] = value
 
             # Handle the new key_value_facts
             if "key_value_facts" in fresh_data and fresh_data["key_value_facts"]:
                 for fact in fresh_data["key_value_facts"]:
-                    # Set each fact as a top-level field in the user's document
-                    # Example: "lucky_number": 42
                     update_payload[fact["key"]] = fact["value"]
 
-            # If there's anything to update, perform a single database operation
+            # If there's anything to update, perform database operation
             if update_payload:
                 update_payload["last_updated"] = now_timestamp
+                
+                # Split $addToSet operations from $set operations
+                set_operations = {k: v for k, v in update_payload.items() if not k.startswith("$")}
+                add_operations = update_payload.get("$addToSet", {})
+                
+                update_doc = {}
+                if set_operations:
+                    update_doc["$set"] = set_operations
+                if add_operations:
+                    update_doc["$addToSet"] = add_operations
+                
                 result = collection.update_one(
                     {"user_id": self.username},
-                    {"$set": update_payload},
+                    update_doc,
                     upsert=True
                 )
                 stored_counts["user_state"] = "updated" if result.modified_count > 0 else "created"
 
             logger.info(f"Storage complete: {stored_counts}")
-
-        except Exception as e:
-            logger.error(f"Error storing data: {e}")
-            raise
             
         except Exception as e:
             logger.error(f"Error storing data: {e}")
