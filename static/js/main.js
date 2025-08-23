@@ -53,9 +53,7 @@ async function streamWelcomeMessage() {
 
     try {
         const response = await fetch(url, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ message: "Welcome" }) // The message is not used, but the body is required for POST
+            method: 'GET'
         });
 
         if (!response.ok) {
@@ -76,10 +74,11 @@ async function streamWelcomeMessage() {
             let lines = buffer.split('\n');
             buffer = lines.pop();
 
-            for (const line of lines) {
+            for (let i = 0; i < lines.length; i++) {
+                const line = lines[i];
                 if (line.startsWith('event: ')) {
                     const eventName = line.substring(7).trim();
-                    const dataLine = lines.shift(); // The next line should be 'data:'
+                    const dataLine = lines[i + 1]; // The next line should be 'data:'
                     if (dataLine && dataLine.startsWith('data: ')) {
                         const data = JSON.parse(dataLine.substring(6).trim());
                         if (eventName === 'status') {
@@ -99,13 +98,15 @@ async function streamWelcomeMessage() {
                         } else if (eventName === 'error' || eventName === 'close') {
                             hideStatus();
                         }
+                        i++; // Skip the data line since it's already processed
                     }
                 }
             }
         }
     } catch (err) {
         hideStatus();
-        addBubble(err.message || 'Something went wrong.', 'error');
+        const errorBubble = addBubble(err.message || 'Something went wrong.', 'assistant');
+        errorBubble.classList.add('error');
     }
 }
 
@@ -144,8 +145,6 @@ form.addEventListener('submit', async (e) => {
         // Get a reader from the streaming body
         const reader = response.body.getReader();
         const decoder = new TextDecoder();
-        let buffer = '';
-
         while (true) {
             const { value, done } = await reader.read();
             if (done) break;
@@ -154,46 +153,37 @@ form.addEventListener('submit', async (e) => {
             let lines = buffer.split('\n');
             buffer = lines.pop(); // Keep the last, possibly incomplete, line in the buffer
 
-            for (const line of lines) {
+            for (let i = 0; i < lines.length; i++) {
+                const line = lines[i].trim();
                 if (line.startsWith('event: ')) {
-                    const eventName = line.substring(7);
-                    if (eventName === 'token') {
-                        const dataLine = lines.shift();
-                        if (dataLine && dataLine.startsWith('data: ')) {
-                            const data = JSON.parse(dataLine.substring(6));
+                    const eventName = line.substring(7).trim();
+                    const dataLine = lines[i + 1] ? lines[i + 1].trim() : null;
+                    if (dataLine && dataLine.startsWith('data: ')) {
+                        const data = JSON.parse(dataLine.substring(6));
+                        if (eventName === 'token') {
                             if (!assistantBubble) {
                                 hideStatus();
                                 assistantBubble = addBubble('', 'assistant');
                             }
                             assistantBubble.textContent += data.text;
                             chat.scrollTop = chat.scrollHeight;
-                        }
-                    } else if (eventName === 'emote') {
-                        const dataLine = lines.shift();
-                        if (dataLine && dataLine.startsWith('data: ')) {
-                            const data = JSON.parse(dataLine.substring(6));
+                        } else if (eventName === 'emote') {
                             if (!assistantBubble) {
                                 hideStatus();
                                 assistantBubble = addBubble('', 'assistant');
                             }
                             assistantBubble.appendChild(addEmote(data.name));
                             chat.scrollTop = chat.scrollHeight;
-                        }
-                    } else if (eventName === 'status') {
-                        const dataLine = lines.shift();
-                        if (dataLine && dataLine.startsWith('data: ')) {
-                            const data = JSON.parse(dataLine.substring(6));
+                        } else if (eventName === 'status') {
                             showStatus(data.message);
+                        } else if (eventName === 'close' || eventName === 'error') {
+                            hideStatus();
                         }
-                    } else if (eventName === 'close' || eventName === 'error') {
-                        // The stream is done or an error occurred.
-                        hideStatus();
-                        // In a real app, you'd handle the 'error' event to show a message.
+                        i++; // Skip the data line since it's already processed
                     }
                 }
             }
         }
-
     } catch (err) {
         hideStatus();
         addBubble(err.message || 'Something went wrong.', 'error');

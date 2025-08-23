@@ -295,7 +295,7 @@ class Carlos:
         )
         return response_text
     
-    def chat_stream(self, message: str, timestamp: str):
+    def chat_stream(self, message: str):
         """Generator to stream chat response."""
         timestamp = datetime.now().isoformat()
         logger.info(f"Received message at {timestamp}: {message}")

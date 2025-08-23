@@ -132,7 +132,7 @@ def api_chat_stream():
         carlos: Carlos = getattr(g, 'carlos', None)
         if carlos is None:
             return jsonify({"error": "Unauthorized"}), 401
-        return Response(carlos.chat_stream(), content_type='text/event-stream')
+        return Response(carlos.chat_stream(message), content_type='text/event-stream')
 
     except Exception as e:
         print(f"/api/chat/stream error: {e}")
