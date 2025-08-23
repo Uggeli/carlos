@@ -91,10 +91,49 @@
     const input = document.getElementById('message');
     const sendBtn = document.getElementById('send');
 
+    // Extract a displayable response string from various reply shapes.
+    function extractResponseText(raw) {
+      try {
+        if (raw == null) return '';
+        // If it's a string, it might itself be JSON – try to parse once.
+        if (typeof raw === 'string') {
+          try {
+            const parsed = JSON.parse(raw);
+            return extractResponseText(parsed);
+          } catch (_) {
+            return raw; // plain text
+          }
+        }
+        // If it's an object, prefer response_text, then content (which may be JSON), else text/message
+        if (typeof raw === 'object') {
+          if (typeof raw.response_text === 'string') return raw.response_text;
+          if (raw.content != null) {
+            const c = raw.content;
+            if (typeof c === 'string') {
+              try {
+                const inner = JSON.parse(c);
+                return extractResponseText(inner);
+              } catch (_) {
+                return c;
+              }
+            }
+            if (typeof c === 'object') return extractResponseText(c);
+          }
+          if (typeof raw.text === 'string') return raw.text;
+          if (typeof raw.message === 'string') return raw.message;
+          // Fallback stringify for unexpected shapes
+          try { return JSON.stringify(raw); } catch { return String(raw); }
+        }
+        return String(raw);
+      } catch (e) {
+        return String(raw ?? '');
+      }
+    }
+
     function addBubble(text, role = 'assistant') {
       const div = document.createElement('div');
       div.className = `bubble ${role}`;
-      div.textContent = text;
+      div.textContent = role === 'assistant' ? extractResponseText(text) : text;
       chat.appendChild(div);
       chat.scrollTop = chat.scrollHeight;
     }
@@ -162,6 +201,14 @@
         sendBtn.disabled = false;
         input.focus();
       }
+    });
+
+    // Normalize any existing assistant bubbles (e.g., server-rendered initial_reply)
+    document.addEventListener('DOMContentLoaded', () => {
+      const assistants = chat.querySelectorAll('.bubble.assistant');
+      assistants.forEach(el => {
+        el.textContent = extractResponseText(el.textContent);
+      });
     });
   </script>
 </body>
