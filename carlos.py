@@ -214,48 +214,35 @@ class CarlosDatabaseHandler:
                 result = collection.insert_many(fresh_data["events"])
                 stored_counts["events"] = len(result.inserted_ids)
 
-            user_state_collection = self.get_collection("user_state")
-            docs_to_insert = []
+            collection = self.get_collection("user_state")
+            update_payload = {}
 
-            if "user_state_updates" in fresh_data:
-                for key, value in fresh_data["user_state_updates"].items():
-                    docs_to_insert.append({
-                        "user_id": self.username,
-                        "key": key,
-                        "value": value,
-                        "timestamp": now_timestamp
-                    })
+            # Handle user_state_updates (e.g., mood, context_flags)
+            if "user_state_updates" in fresh_data and fresh_data["user_state_updates"]:
+                update_payload.update(fresh_data["user_state_updates"])
 
-            if "semantic_tags" in fresh_data:
-                for tag in fresh_data["semantic_tags"]:
-                    if '_' in tag:
-                        # Split from the right, only once
-                        parts = tag.rsplit('_', 1)
-                        if len(parts) == 2:
-                            key, value_str = parts
-                            value: Any = value_str
-                            
-                            # Attempt to convert value to a number
-                            try:
-                                value = int(value_str)
-                            except ValueError:
-                                try:
-                                    value = float(value_str)
-                                except ValueError:
-                                    pass  # Keep as string if conversion fails
-                            
-                            docs_to_insert.append({
-                                "user_id": self.username,
-                                "key": key,
-                                "value": value,
-                                "timestamp": now_timestamp
-                            })
-            
-            if docs_to_insert:
-                result = user_state_collection.insert_many(docs_to_insert)
-                stored_counts["user_state_facts"] = len(result.inserted_ids)
+            # Handle the new key_value_facts
+            if "key_value_facts" in fresh_data and fresh_data["key_value_facts"]:
+                for fact in fresh_data["key_value_facts"]:
+                    # Set each fact as a top-level field in the user's document
+                    # Example: "lucky_number": 42
+                    update_payload[fact["key"]] = fact["value"]
+
+            # If there's anything to update, perform a single database operation
+            if update_payload:
+                update_payload["last_updated"] = now_timestamp
+                result = collection.update_one(
+                    {"user_id": self.username},
+                    {"$set": update_payload},
+                    upsert=True
+                )
+                stored_counts["user_state"] = "updated" if result.modified_count > 0 else "created"
 
             logger.info(f"Storage complete: {stored_counts}")
+
+        except Exception as e:
+            logger.error(f"Error storing data: {e}")
+            raise
             
         except Exception as e:
             logger.error(f"Error storing data: {e}")
