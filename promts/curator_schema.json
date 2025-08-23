@@ -1,0 +1,147 @@
+{
+  "type": "json_schema",
+  "json_schema": {
+    "name": "curator_schema",
+    "strict": true,
+    "schema": {
+      "type": "object",
+      "properties": {
+        "fresh_data_to_store": {
+          "type": "object",
+          "description": "New information extracted from user input to store in DB",
+          "properties": {
+            "entities": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "name": { "type": "string" },
+                  "type": {
+                    "type": "string",
+                    "enum": ["person", "project", "object", "concept", "location", "event"]
+                  },
+                  "status": { "type": "string" },
+                  "attributes": { "type": "object" }
+                },
+                "required": ["name", "type"]
+              }
+            },
+            "events": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "enum": ["milestone", "problem", "decision", "update", "goal"]
+                  },
+                  "description": { "type": "string" },
+                  "entities_involved": {
+                    "type": "array",
+                    "items": { "type": "string" }
+                  },
+                  "sentiment": {
+                    "type": "string",
+                    "enum": ["positive", "negative", "neutral", "frustrated", "excited"]
+                  },
+                  "priority": { "type": "integer", "minimum": 1, "maximum": 5 }
+                },
+                "required": ["type", "description"]
+              }
+            },
+            "user_state_updates": {
+              "type": "object",
+              "properties": {
+                "active_projects": { "type": "object" },
+                "goals": { "type": "array", "items": { "type": "string" } },
+                "preferences": { "type": "object" },
+                "current_mood": { "type": "string" },
+                "context_flags": { "type": "array", "items": { "type": "string" } }
+              }
+            },
+            "key_value_facts": {
+              "type": "array",
+              "description": "A list of specific key-value facts to be stored.",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "key": { "type": "string" },
+                  "value": { "type": ["string", "number", "boolean"] }
+                },
+                "required": ["key", "value"]
+              }
+            }
+          }
+        },
+        "context_retrieval_queries": {
+          "type": "array",
+          "description": "MongoDB queries to fetch relevant context",
+          "items": {
+            "type": "object",
+            "properties": {
+              "purpose": { "type": "string", "description": "What this query is trying to find" },
+              "collection": {
+                "type": "string",
+                "enum": ["conversations", "user_state", "events", "entities"]
+              },
+              "query": { "type": "object", "description": "MongoDB query object" },
+              "sort": { "type": "object", "description": "MongoDB sort criteria" },
+              "limit": { "type": "integer", "minimum": 1, "maximum": 20, "default": 5 },
+              "priority": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 5,
+                "description": "How important this context is (5=critical, 1=nice-to-have)"
+              },
+              "timeframe": {
+                "type": "string",
+                "enum": ["last_hour", "today", "this_week", "this_month", "recent", "all_time"]
+              }
+            },
+            "required": ["purpose", "collection", "query", "priority"]
+          }
+        },
+        "context_focus": {
+          "type": "object",
+          "description": "How to prioritize and organize the retrieved context",
+          "properties": {
+            "primary_theme": { "type": "string" },
+            "emotional_context": {
+              "type": "string",
+              "enum": ["celebration", "support", "problem_solving", "information", "planning"]
+            },
+            "temporal_priority": {
+              "type": "string",
+              "enum": ["recent_first", "chronological", "relevance_based"]
+            },
+            "max_context_age": { "type": "string" },
+            "key_relationships": { "type": "array", "items": { "type": "string" } }
+          },
+          "required": ["primary_theme", "emotional_context"]
+        },
+        "curiosity_analysis": {
+          "type": "object",
+          "description": "Curator's analysis of what makes this input interesting",
+          "properties": {
+            "user_intent": { "type": "string" },
+            "implied_questions": { "type": "array", "items": { "type": "string" } },
+            "missing_context_signals": { "type": "array", "items": { "type": "string" } },
+            "conversation_trajectory": {
+              "type": "string",
+              "enum": ["new_topic", "follow_up", "status_check", "problem_escalation", "celebration"]
+            },
+            "attention_markers": { "type": "array", "items": { "type": "string" } }
+          },
+          "required": ["user_intent", "conversation_trajectory"]
+        }
+      },
+      "required": [
+        "fresh_data_to_store",
+        "context_retrieval_queries",
+        "context_focus",
+        "curiosity_analysis"
+      ],
+      "additionalProperties": false
+    }
+  }
+}

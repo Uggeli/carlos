@@ -3,7 +3,7 @@ from pymongo import MongoClient, ASCENDING, DESCENDING, TEXT
 from pymongo.operations import IndexModel
 from bson import ObjectId
 import requests
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 import os
 import json
 from typing import Optional, List, Dict, Any
@@ -131,7 +131,7 @@ class CarlosDatabaseHandler:
             
             # User state collection index
             user_state = self.get_collection("user_state")
-            user_state.create_index([("user_id", 1)], unique=True)
+            user_state.create_index([("user_id", 1)])
             
             logger.info("Database indexes created successfully")
         except Exception as e:
@@ -143,7 +143,7 @@ class CarlosDatabaseHandler:
 
     def _get_timeframe_query(self, timeframe: str) -> Dict[str, Any]:
         """Generate MongoDB timestamp query from timeframe string."""
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
         time_query = {}
         
         timeframe_map = {
@@ -176,7 +176,7 @@ class CarlosDatabaseHandler:
         """Store a conversation turn in the database."""
         conversation_doc = {
             "user_id": self.username,
-            "timestamp": datetime.utcnow(),
+            "timestamp": datetime.now(timezone.utc),
             "user_input": user_input,
             "assistant_response": assistant_response,
             "entities": entities or [],
@@ -192,7 +192,7 @@ class CarlosDatabaseHandler:
     def process_and_store_data(self, fresh_data: Dict[str, Any]):
         """Store new information from curator's output."""
         logger.info("Storing fresh data from curator...")
-        now_timestamp = datetime.utcnow()
+        now_timestamp = datetime.now(timezone.utc)
         stored_counts = {}
 
         try:
@@ -214,18 +214,46 @@ class CarlosDatabaseHandler:
                 result = collection.insert_many(fresh_data["events"])
                 stored_counts["events"] = len(result.inserted_ids)
 
-            # Update user state
-            if "user_state_updates" in fresh_data and fresh_data["user_state_updates"]:
-                collection = self.get_collection("user_state")
-                update_data = fresh_data["user_state_updates"]
-                update_data["last_updated"] = now_timestamp
-                
-                result = collection.update_one(
-                    {"user_id": self.username},
-                    {"$set": update_data},
-                    upsert=True
-                )
-                stored_counts["user_state"] = "updated" if result.modified_count > 0 else "created"
+            user_state_collection = self.get_collection("user_state")
+            docs_to_insert = []
+
+            if "user_state_updates" in fresh_data:
+                for key, value in fresh_data["user_state_updates"].items():
+                    docs_to_insert.append({
+                        "user_id": self.username,
+                        "key": key,
+                        "value": value,
+                        "timestamp": now_timestamp
+                    })
+
+            if "semantic_tags" in fresh_data:
+                for tag in fresh_data["semantic_tags"]:
+                    if '_' in tag:
+                        # Split from the right, only once
+                        parts = tag.rsplit('_', 1)
+                        if len(parts) == 2:
+                            key, value_str = parts
+                            value: Any = value_str
+                            
+                            # Attempt to convert value to a number
+                            try:
+                                value = int(value_str)
+                            except ValueError:
+                                try:
+                                    value = float(value_str)
+                                except ValueError:
+                                    pass  # Keep as string if conversion fails
+                            
+                            docs_to_insert.append({
+                                "user_id": self.username,
+                                "key": key,
+                                "value": value,
+                                "timestamp": now_timestamp
+                            })
+            
+            if docs_to_insert:
+                result = user_state_collection.insert_many(docs_to_insert)
+                stored_counts["user_state_facts"] = len(result.inserted_ids)
 
             logger.info(f"Storage complete: {stored_counts}")
             
@@ -307,32 +335,12 @@ class CuratorHandler:
 
 class Carlos:
     """Carlos is a conversational AI system that interacts with users, processes messages, and retrieves information from a MongoDB database."""
-
-    CURATOR_SCHEMA = "" # Most of stuff are defined at lm studio server side, but we can define some here if needed
-    thinker_schema = {
-        "type": "json_schema",
-        "json_schema": {
-            "name": "thinker_analysis",
-            "strict": True, # Ensures the output strictly follows this schema
-            "schema": {
-                "type": "object",
-                "properties": {
-                    "summary_of_known_facts": {"type": "string"},
-                    "contradictions_or_gaps": {"type": "string"},
-                    "key_insights": {"type": "string"},
-                    "principal_user_intent": {"type": "string"},
-                    "suggested_next_step": {"type": "string"}
-                },
-                "required": [
-                    "summary_of_known_facts",
-                    "contradictions_or_gaps",
-                    "key_insights",
-                    "principal_user_intent",
-                    "suggested_next_step"
-                ]
-            }
-        }
-    }
+    curator_schema = "" 
+    curator_system_prompt = ""
+    thinker_schema = ""
+    thinker_system_prompt = ""
+    response_generator_schema = ""
+    response_generator_system_prompt = ""
     
     def __init__(self, username: Optional[str] = None, password: Optional[str] = None, mongo_uri: Optional[str] = None, api_endpoint: Optional[str] = None):
         """Initialize Carlos with MongoDB client and API endpoint."""
@@ -344,6 +352,25 @@ class Carlos:
         
         self.db_handler = CarlosDatabaseHandler(self.mongo_uri, username)
         self.curator_handler = CuratorHandler(self.db_handler)
+
+        # Load systems prompts and schemas
+        try:
+            with open("promts/curator_schema.json", "r") as f:
+                self.curator_schema = json.loads(f.read())
+            with open("promts/curator_system_prompt.txt", "r") as f:
+                self.curator_system_prompt = f.read()
+            with open("promts/thinker_schema.json", "r") as f:
+                self.thinker_schema = json.loads(f.read())
+            with open("promts/thinker_system_prompt.txt", "r") as f:
+                self.thinker_system_prompt = f.read()
+            with open("promts/response_generator_schema.json", "r") as f:
+                self.response_generator_schema = json.loads(f.read())
+            with open("promts/response_generator_system_prompt.txt", "r") as f:
+                self.response_generator_system_prompt = f.read()
+            logger.info("Loaded system prompts and schemas successfully")
+        except Exception as e:
+            logger.error(f"Error loading prompts/schemas: {e}")
+            raise   
 
     def _api_talk(self, message: str, url: str) -> dict:
         """Send Message to API endpoint and return response."""
@@ -359,11 +386,12 @@ class Carlos:
     def _curate(self, message: str) -> dict[str, Any]:
         """Send Message to curator model"""
         curator_message = {
-            "model": "curator",
+            "model": "carlos",
             "messages": [
-                {"role": "system", "content": self.CURATOR_SCHEMA},
+                {"role": "system", "content": self.curator_system_prompt},
                 {"role": "user", "content": message}
             ],
+            "response_format": self.curator_schema,
             "temperature": 0,
             "max_tokens": -1,
             "stream": False
@@ -385,9 +413,9 @@ class Carlos:
     def _think(self, message: str, curator_analysis: dict) -> tuple[dict[str, Any], bool]:
         """Think about the curator provided data. return true if we need to query curator."""
         thinker_message = {
-            "model": "thinker",
+            "model": "carlos",
             "messages": [
-                {"role": "system", "content": "You are a thinking AI that analyzes curator data."},
+                {"role": "system", "content": self.thinker_system_prompt},
                 {"role": "system", "content": "Curator data: " + json.dumps(curator_analysis)},
                 {"role": "user", "content": f"Orginal user message: {message}"}
             ],
@@ -408,11 +436,14 @@ class Carlos:
     
     def _build_response(self, think_data: dict[str, Any], message: str) -> str:
         response_message = {
-            "model": "response_generator",
+            "model": "carlos",
             "messages": [
+                {"role": "system", "content": self.response_generator_system_prompt},
                 {"role": "system", "content": "Thinker data: " + json.dumps(think_data)},
                 {"role": "user", "content": f"Original user message: {message}"}
             ],
+            "response_format": self.response_generator_schema,
+            "temperature": 0.7,
         }
         response = self._api_talk(response_message, url="v1/chat/completions")
         if response.get("choices"):

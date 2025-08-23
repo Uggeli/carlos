@@ -1,0 +1,34 @@
+{
+    "type": "json_schema",
+    "json_schema": {
+        "name": "thinker_analysis",
+        "strict": true,
+        "schema": {
+        "type": "object",
+        "properties": {
+            "summary_of_known_facts": {
+                "type": "string"
+            },
+            "contradictions_or_gaps": {
+                "type": "string"
+            },
+            "key_insights": {
+                "type": "string"
+            },
+            "principal_user_intent": {
+                "type": "string"
+            },
+            "suggested_next_step": {
+                "type": "string"
+            }
+        },
+        "required": [
+            "summary_of_known_facts",
+            "contradictions_or_gaps",
+            "key_insights",
+            "principal_user_intent",
+            "suggested_next_step"
+        ]
+        }
+    }
+}
