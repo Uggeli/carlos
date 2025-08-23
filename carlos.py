@@ -315,6 +315,19 @@ class CarlosDatabaseHandler:
             if context_results[purpose] is None:
                 context_results[purpose] = 'No results found'
 
+        # Ensure all fields are json serializable
+        for purpose, results in context_results.items():
+            if isinstance(results, list):
+                for doc in results:
+                    if '_id' in doc:
+                        doc['_id'] = str(doc['_id'])
+            elif isinstance(results, dict) and '_id' in results:
+                results['_id'] = str(results['_id'])
+            elif isinstance(results, ObjectId):
+                context_results[purpose] = str(results)
+            elif isinstance(results, datetime):
+                context_results[purpose] = results.isoformat()
+                    
         return context_results
 
 class CuratorHandler:
@@ -335,7 +348,7 @@ class CuratorHandler:
         retrieved_context = {}
         if "context_retrieval_queries" in curator_output and curator_output["context_retrieval_queries"]:
             retrieved_context = self.db_handler.retrieve_context(curator_output["context_retrieval_queries"])
-        
+
         return retrieved_context
 
 class Carlos:
@@ -494,7 +507,6 @@ class Carlos:
         )
 
         return response_text
-
 
     def get_debug_info(self, message: str) -> Dict[str, Any]:
         response = requests.post(f"{self.api_endpoint}/debug", json={"message": message})

@@ -27,6 +27,20 @@
     .assistant { background: rgba(96, 165, 250, .1); border: 1px solid rgba(96, 165, 250, .3); color: var(--text); margin-right: auto; }
     .error { background: rgba(239, 68, 68, .1); border: 1px solid rgba(239, 68, 68, .3); color: var(--text); }
 
+    .typing { background: rgba(96, 165, 250, .1); border: 1px solid rgba(96, 165, 250, .3); color: var(--muted); margin-right: auto; font-style: italic; opacity: 0.8; }
+    
+    .typing-dots::after {
+      content: '';
+      animation: typing-dots 1.5s infinite;
+    }
+    
+    @keyframes typing-dots {
+      0%, 20% { content: ''; }
+      25%, 45% { content: '.'; }
+      50%, 70% { content: '..'; }
+      75%, 95% { content: '...'; }
+    }
+
     .composer { border-top: 1px solid #1f2a44; background: var(--panel); padding: 12px; display: grid; grid-template-columns: 1fr auto; gap: 8px; }
     textarea { width: 100%; resize: none; min-height: 48px; max-height: 160px; padding: 10px 12px; border-radius: 10px; border: 1px solid #22304f; background: #0c1424; color: var(--text); outline: none; }
     textarea:focus { border-color: var(--accent); box-shadow: 0 0 0 2px rgba(76,201,240,.15); }
@@ -93,6 +107,21 @@
       chat.scrollTop = chat.scrollHeight;
     }
 
+    function showTyping() {
+      const div = document.createElement('div');
+      div.className = 'bubble typing';
+      div.id = 'typing-indicator';
+      div.innerHTML = '<span class="typing-dots">Carlos is typing</span>';
+      chat.appendChild(div);
+      chat.scrollTop = chat.scrollHeight;
+      return div;
+    }
+
+    function hideTyping() {
+      const typing = document.getElementById('typing-indicator');
+      if (typing) typing.remove();
+    }
+
     input.addEventListener('keydown', (e) => {
       if (e.key === 'Enter' && !e.shiftKey) {
         e.preventDefault();
@@ -110,6 +139,9 @@
       input.style.height = 'auto';
       sendBtn.disabled = true;
 
+      // Show typing indicator
+      const typingIndicator = showTyping();
+
       try {
         const res = await fetch('/api/chat', {
           method: 'POST',
@@ -117,9 +149,14 @@
           body: JSON.stringify({ message })
         });
         const data = await res.json();
+        
+        // Hide typing indicator before showing response
+        hideTyping();
+        
         if (!res.ok) throw new Error(data.error || 'Failed');
         addBubble(data.reply || '');
       } catch (err) {
+        hideTyping();
         addError(err.message || 'Something went wrong');
       } finally {
         sendBtn.disabled = false;
