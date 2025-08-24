@@ -14,12 +14,12 @@ function addBubble(text, role = 'assistant', isThinking = false) {
     return div;
 }
 
-// Handles the emote formatting
+// Handles the emote formatting - creates a div for line break
 function addEmote(emoteName) {
-    const span = document.createElement('span');
-    span.className = 'emote';
-    span.textContent = ` [${emoteName}] `;
-    return span;
+    const div = document.createElement('div');
+    div.className = 'emote';
+    div.textContent = `[${emoteName}]`;
+    return div;
 }
 
 // Show a loading message with the "thinking dots" animation
@@ -80,7 +80,9 @@ async function streamWelcomeMessage() {
                     const eventName = line.substring(7).trim();
                     const dataLine = lines[i + 1]; // The next line should be 'data:'
                     if (dataLine && dataLine.startsWith('data: ')) {
-                        const data = JSON.parse(dataLine.substring(6).trim());
+                        const jsonStr = dataLine.substring(6).trim();
+                        console.log('Parsing JSON:', jsonStr);
+                        const data = JSON.parse(jsonStr);
                         if (eventName === 'status') {
                             showStatus(data.message);
                         } else if (eventName === 'token') {
@@ -88,13 +90,15 @@ async function streamWelcomeMessage() {
                                 hideStatus();
                                 assistantBubble = addBubble('', 'assistant');
                             }
-                            assistantBubble.textContent += data.text;
+                            // Create text node instead of using textContent to preserve emotes
+                            const textNode = document.createTextNode(data.text);
+                            assistantBubble.appendChild(textNode);
                         } else if (eventName === 'emote') {
                             if (!assistantBubble) {
                                 hideStatus();
                                 assistantBubble = addBubble('', 'assistant');
                             }
-                            assistantBubble.appendChild(addEmote(data.emote));
+                            assistantBubble.appendChild(addEmote(data.name));
                         } else if (eventName === 'error' || eventName === 'close') {
                             hideStatus();
                         }
@@ -145,6 +149,7 @@ form.addEventListener('submit', async (e) => {
         // Get a reader from the streaming body
         const reader = response.body.getReader();
         const decoder = new TextDecoder();
+        let buffer = '';
         while (true) {
             const { value, done } = await reader.read();
             if (done) break;
@@ -159,13 +164,17 @@ form.addEventListener('submit', async (e) => {
                     const eventName = line.substring(7).trim();
                     const dataLine = lines[i + 1] ? lines[i + 1].trim() : null;
                     if (dataLine && dataLine.startsWith('data: ')) {
-                        const data = JSON.parse(dataLine.substring(6));
+                        const jsonStr = dataLine.substring(6);
+                        console.log('Parsing JSON:', jsonStr);
+                        const data = JSON.parse(jsonStr);
                         if (eventName === 'token') {
                             if (!assistantBubble) {
                                 hideStatus();
                                 assistantBubble = addBubble('', 'assistant');
                             }
-                            assistantBubble.textContent += data.text;
+                            // Create text node instead of using textContent to preserve emotes
+                            const textNode = document.createTextNode(data.text);
+                            assistantBubble.appendChild(textNode);
                             chat.scrollTop = chat.scrollHeight;
                         } else if (eventName === 'emote') {
                             if (!assistantBubble) {

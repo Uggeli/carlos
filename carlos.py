@@ -97,6 +97,8 @@ class Carlos:
     thinker_system_prompt = ""
     response_generator_schema = ""
     response_generator_system_prompt = ""
+    summarizer_schema = ""
+    summarizer_system_prompt = ""
     
     def __init__(self, username: Optional[str] = None, password: Optional[str] = None, mongo_uri: Optional[str] = None, api_endpoint: Optional[str] = None):
         """Initialize Carlos with MongoDB client and API endpoint."""
@@ -123,6 +125,10 @@ class Carlos:
                 self.response_generator_schema = json.loads(f.read())
             with open("promts/response_generator_system_prompt.txt", "r") as f:
                 self.response_generator_system_prompt = f.read()
+            with open("promts/summarizer_schema.json", "r") as f:
+                self.summarizer_schema = json.loads(f.read())
+            with open("promts/summarizer_system_prompt.txt", "r") as f:
+                self.summarizer_system_prompt = f.read()
             logger.info("Loaded system prompts and schemas successfully")
         except Exception as e:
             logger.error(f"Error loading prompts/schemas: {e}")
@@ -137,9 +143,12 @@ class Carlos:
         if response.status_code == 200:
             return response.json()
         else:
+            logger.error(f"API error {response.status_code}: {response.text}")
+            logger.debug(f"Failed request payload: {json.dumps(message)}")
             raise Exception(f"API error: {response.status_code} - {response.text}")
         
-    def _curate(self, message: str) -> dict[str, Any]:
+        
+    def _curate(self, message: str, chunk: str=None) -> dict[str, Any]:
         """Send Message to curator model"""
         curator_message = {
             "model": "carlos",
@@ -152,6 +161,10 @@ class Carlos:
             "max_tokens": -1,
             "stream": False
         }
+        if chunk:
+            curator_message["messages"].append({"role": "system", "content": f"Long input split into chunks. Directive: Store all information for later synthesis."})
+            curator_message["messages"].append({"role": "system", "content": f"Chunk info: {chunk}"})
+
         response = self._api_talk(curator_message, url="v1/chat/completions")
         logger.debug(f"Curator response: {response}")
         fresh_data_to_store, context_retrieval_queries, context_focus, curiosity_analysis = self._parse_curator_response(response)
@@ -166,6 +179,17 @@ class Carlos:
             timeframe="recent",
             limit=5
         )
+
+        # Summarize conversationhistory
+        for conv in from_conversations:
+            if len(conv.get("user_input", "")) > 150:
+                conv["user_input_summary"] = self._summarize_for_memory(conv["user_input"])
+            else:
+                conv["user_input_summary"] = conv["user_input"]
+            if len(conv.get("assistant_response", "")) > 150:
+                conv["assistant_response_summary"] = self._summarize_for_memory(conv["assistant_response"])
+            else:
+                conv["assistant_response_summary"] = conv["assistant_response"]
         
         return {
             "context_focus": context_focus,
@@ -174,6 +198,32 @@ class Carlos:
             "from_conversations": from_conversations
         }
     
+    def _summarize_for_memory(self, message: str) -> str:
+        """Summarize message for long-term memory storage."""
+        summary_prompt = {
+            "model": "carlos",
+            "messages": [
+                {"role": "system", "content": self.summarizer_system_prompt},
+                {"role": "user", "content": message}
+            ],
+            "response_format": self.summarizer_schema,
+            "temperature": 0,
+            "max_tokens": 100,
+            "stream": False
+        }
+        response = self._api_talk(summary_prompt, url="v1/chat/completions")
+        if response.get("choices"):
+            try:
+                summary_data = json.loads(response["choices"][0].get("message", {}).get("content", "{}"))
+                return summary_data.get("summary", message[:150])
+            except json.JSONDecodeError:
+                logger.error("Failed to parse summarizer response as JSON")
+                return message[:150]
+        else:
+            logger.error("Summarization returned no choices")
+            return message[:150]
+
+
     def _think(self, message: str, curator_analysis: dict) -> tuple[dict[str, Any], bool]:
         """Think about the curator provided data. return true if we need to query curator."""
         thinker_message = {
@@ -233,9 +283,9 @@ class Carlos:
     
     def _process_big_input(self, message: str) -> dict[str, Any]:
         """Split big input into smaller chunks if needed."""
-        max_chunk_size = 4000
+        max_chunk_size = 4096
         if len(message) <= max_chunk_size:
-            return self._curate(message)
+            return self._curate(message), self._summarize_for_memory(message)
         # Split by sentences for better coherence
         sentences = re.split(r'(?<=[.!?]) +', message)
         chunks = []
@@ -257,20 +307,26 @@ class Carlos:
                 "semantic_tags": []
             }
         }
-
-        for chunk in chunks:
-            chunk_analysis = self._curate(chunk)
+        summary_chunks = []
+        # TODO: test if we should think about chunked input and collect all that
+        logger.info(f"Input message split into {len(chunks)} chunks for curation")
+        for i, chunk in enumerate(chunks):
+            logger.debug(f"Processing chunk {i+1}/{len(chunks)}")
+            chunk_analysis = self._curate(chunk, chunk=f"Chunk {i+1} of {len(chunks)}")
+            summary_chunks.append(self._summarize_for_memory(chunk))
             # Combine retrieved context
             for key in ["entities", "semantic_tags"]:
                 combined_analysis["retrieved_context"][key].extend(chunk_analysis.get("retrieved_context", {}).get(key, []))
             # Merge context_focus and curiosity_analysis (simple overwrite for now)
             combined_analysis["context_focus"].update(chunk_analysis.get("context_focus", {}))
             combined_analysis["curiosity_analysis"].update(chunk_analysis.get("curiosity_analysis", {}))
-
+            logger.debug(f"Chunk analysis: {chunk_analysis} \n {i+1}/{len(chunks)}")
+        
         # Deduplicate entities and semantic tags
         combined_analysis["retrieved_context"]["entities"] = list(set(combined_analysis["retrieved_context"]["entities"]))
         combined_analysis["retrieved_context"]["semantic_tags"] = list(set(combined_analysis["retrieved_context"]["semantic_tags"]))
-        return combined_analysis
+
+        return combined_analysis, summary_chunks
 
     def chat(self, message: str) -> str:
         """Process a chat message and return a response."""
@@ -283,7 +339,7 @@ class Carlos:
         think_data, needs_curator = self._think(message, curator_analysis)
         if needs_curator:
             logger.info("Rethinking required, querying curator again...")
-            # fire up curator again with thinker data
+            # TODO: fire up curator again with thinker data
 
         response_text = self._build_response(think_data, message, timestamp)
         # Store the conversation turn
@@ -301,11 +357,11 @@ class Carlos:
         logger.info(f"Received message at {timestamp}: {message}")
         message += f" [{timestamp}]"
         message += f" [username: {self.username}]"
-        yield "event: status\ndata: {\"status\": \"thinking\"}\n\n"
-        curator_analysis = self._process_big_input(message)
-        yield "event: status\ndata: {\"status\": \"formulating\"}\n\n"
+        yield "event: status\ndata: {\"message\": \"thinking\"}\n\n"
+        curator_analysis, summarised_message = self._process_big_input(message)
+        yield "event: status\ndata: {\"message\": \"formulating\"}\n\n"
         think_data, needs_curator = self._think(message, curator_analysis)
-        yield "event: status\ndata: {\"status\": \"pondering\"}\n\n"
+        yield "event: status\ndata: {\"message\": \"pondering\"}\n\n"
         if needs_curator:
             logger.info("Rethinking required, querying curator again...")
             # fire up curator again with thinker data
@@ -324,10 +380,12 @@ class Carlos:
         }
 
         emote_pattern = re.compile(r"(\[.*?\])")
-
+        
         with requests.post(f"{self.api_endpoint}/v1/chat/completions", json=response_message, stream=True) as response:
             response.raise_for_status()
-            full_response = ""
+            buffer = ""
+            processed_content = ""
+            
             for line in response.iter_lines():
                 if not line:
                     continue
@@ -341,32 +399,74 @@ class Carlos:
                         delta = data.get("choices", [{}])[0].get("delta", {})
                         content_chunk = delta.get("content", "")
                         if content_chunk:
-                            full_response += content_chunk
-                            parts = emote_pattern.split(full_response)
-                            for part in parts[:-1]:
-                                if emote_pattern.match(part):
-                                    emote_name = part.strip("[]")
-                                    yield f"event: emote\ndata: {{\"emote\": \"{emote_name}\"}}\n\n"
+                            buffer += content_chunk
+                            
+                            # Process complete emotes and text
+                            while True:
+                                emote_match = emote_pattern.search(buffer)
+                                if emote_match:
+                                    # Send text before emote
+                                    text_before = buffer[:emote_match.start()]
+                                    if text_before:
+                                        yield f"event: token\ndata: {json.dumps({'text': text_before})}\n\n"
+                                        processed_content += text_before
+                                    
+                                    # Send emote
+                                    emote_name = emote_match.group(1).strip("[]")
+                                    yield f"event: emote\ndata: {json.dumps({'name': emote_name})}\n\n"
+                                    processed_content += emote_match.group(1)
+                                    
+                                    # Remove processed part from buffer
+                                    buffer = buffer[emote_match.end():]
                                 else:
-                                    yield f"event: message\ndata: {{\"message\": \"{part}\"}}\n\n"
-                            full_response = parts[-1]
+                                    # No complete emote found, check if buffer might contain incomplete emote
+                                    bracket_pos = buffer.rfind('[')
+                                    if bracket_pos == -1:
+                                        # No opening bracket, send all as text
+                                        if buffer:
+                                            yield f"event: token\ndata: {json.dumps({'text': buffer})}\n\n"
+                                            processed_content += buffer
+                                            buffer = ""
+                                        break
+                                    else:
+                                        # Send text before potential incomplete emote
+                                        if bracket_pos > 0:
+                                            text_part = buffer[:bracket_pos]
+                                            yield f"event: token\ndata: {json.dumps({'text': text_part})}\n\n"
+                                            processed_content += text_part
+                                            buffer = buffer[bracket_pos:]
+                                        break
+                                        
                     except json.JSONDecodeError:
                         logger.error(f"Failed to decode JSON from stream: {json_str}")
-            if full_response:
-                yield f"event: message\ndata: {{\"message\": \"{full_response}\"}}\n\n"
+            
+            # Send any remaining buffer content
+            if buffer:
+                yield f"event: token\ndata: {json.dumps({'text': buffer})}\n\n"
+                processed_content += buffer
         
         try:
-            final_response_data = json.loads(full_response)
-            assistant_response = final_response_data.get("response", full_response)
+            final_response_data = json.loads(processed_content)
+            assistant_response = final_response_data.get("response", processed_content)
         except json.JSONDecodeError:
-            assistant_response = "Error: Failed to parse final response."
+            assistant_response = processed_content
         # Store the conversation turn
-        self.db_handler.store_conversation(
-            user_input=message,
-            assistant_response=assistant_response,
-            entities=curator_analysis.get("retrieved_context", {}).get("entities", []),
-            semantic_tags=curator_analysis.get("retrieved_context", {}).get("semantic_tags", [])
-        )
+        # TODO: if user message is huge, we should store chunked analysis
+        if isinstance(summarised_message, list):
+            for summary in summarised_message:
+                self.db_handler.store_conversation(
+                    user_input=summary,
+                    assistant_response=assistant_response,
+                    entities=curator_analysis.get("retrieved_context", {}).get("entities", []),
+                    semantic_tags=curator_analysis.get("retrieved_context", {}).get("semantic_tags", [])
+                )
+        else:
+            self.db_handler.store_conversation(
+                user_input=message,
+                assistant_response=assistant_response,
+                entities=curator_analysis.get("retrieved_context", {}).get("entities", []),
+                semantic_tags=curator_analysis.get("retrieved_context", {}).get("semantic_tags", [])
+            )
 
     def store_conversation(self, user_input: str, assistant_response: str, entities: list[str], semantic_tags: list[str]) -> None:
         """Public method to store a conversation turn."""
@@ -383,5 +483,4 @@ class Carlos:
 
 if __name__ == "__main__":
     carlos = Carlos()
-
     print("Carlos initialized with MongoDB client and API endpoint.")

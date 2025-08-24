@@ -1,0 +1,19 @@
+{
+  "type": "json_schema",
+  "json_schema": {
+    "name": "memory_summary",
+    "schema": {
+      "type": "object",
+      "properties": {
+        "summary": {
+          "type": "string",
+          "description": "Concise summary of the input text, maximum 50 words",
+          "maxLength": 300
+        }
+      },
+      "required": ["summary"],
+      "additionalProperties": false
+    },
+    "strict": true
+  }
+}

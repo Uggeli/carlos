@@ -1,4 +1,3 @@
-from datetime import datetime, timezone
 from flask import Flask, Response, render_template, request, jsonify, session, g, redirect, url_for
 from carlos import Carlos
 import os
@@ -32,7 +31,7 @@ def robots():
 
 @app.before_request
 def before_request():
-    # ... your existing code ...
+    """Authenticate user before processing request, except for open paths."""
     logging.info(f"Request: {request.method} {request.path} - {request.remote_addr}")
     open_paths = {"/login", "/favicon.ico", "/robots.txt"}
     is_static = request.path.startswith("/static/")
@@ -77,7 +76,7 @@ def login():
         return redirect(next_url)
     return render_template('login.html')
 
-@app.post('/logout')
+@app.route('/logout', methods=['GET', 'POST'])
 def logout():
     """Clear session and optional in-memory Carlos instance."""
     username = session.pop('username', None)
@@ -88,7 +87,7 @@ def logout():
     finally:
         return redirect(url_for('login'))
 
-@app.route('/api/welcome/stream', methods=['POST'])
+@app.route('/api/welcome/stream', methods=['GET'])
 def api_welcome_stream():
     try:
         carlos: Carlos = getattr(g, 'carlos', None)
@@ -122,7 +121,7 @@ def api_chat():
         print(f"/api/chat error: {e}")
         return jsonify({"error": "Failed to get response"}), 500
 
-@app.route('/api/chat/stream', methods=['POST'])
+@app.route('/api/chat/stream', methods=['GET', 'POST'])
 def api_chat_stream():
     data = request.get_json(silent=True) or {}
     message = (data.get('message') or '').strip()
