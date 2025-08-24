@@ -4,6 +4,14 @@ const input = document.getElementById('message');
 const sendBtn = document.getElementById('send');
 const rootElement = document.querySelector('body');
 const isNewSession = rootElement.dataset.isNewSession === 'True';
+
+// Proactive message polling
+let proactivePolling = false;
+let lastActivityTime = Date.now();
+
+// Internal thoughts panel
+let thoughtsPanel = null;
+let thoughtsVisible = false;
 // A simple utility to create and append a chat bubble
 function addBubble(text, role = 'assistant', isThinking = false) {
     const div = document.createElement('div');
@@ -11,6 +19,29 @@ function addBubble(text, role = 'assistant', isThinking = false) {
     div.textContent = text;
     chat.appendChild(div);
     chat.scrollTop = chat.scrollHeight;
+    return div;
+}
+
+// Create a proactive message bubble with special styling
+function addProactiveBubble(text) {
+    const div = document.createElement('div');
+    div.className = 'bubble assistant proactive';
+    div.textContent = text;
+    
+    // Add a subtle animation
+    div.style.opacity = '0';
+    div.style.transform = 'translateY(10px)';
+    
+    chat.appendChild(div);
+    chat.scrollTop = chat.scrollHeight;
+    
+    // Animate in
+    requestAnimationFrame(() => {
+        div.style.transition = 'opacity 0.5s ease, transform 0.5s ease';
+        div.style.opacity = '1';
+        div.style.transform = 'translateY(0)';
+    });
+    
     return div;
 }
 
@@ -43,6 +74,163 @@ function hideStatus() {
     if (statusDiv) {
         statusDiv.remove();
     }
+}
+
+// Check for proactive messages from autonomous shards
+async function checkProactiveMessages() {
+    try {
+        const response = await fetch('/api/proactive');
+        if (response.ok) {
+            const data = await response.json();
+            if (data.has_message && data.message) {
+                addProactiveBubble(data.message);
+                // Reset activity time since we got a message
+                lastActivityTime = Date.now();
+            }
+        }
+    } catch (error) {
+        console.error('Error checking proactive messages:', error);
+    }
+}
+
+// Start proactive message polling
+function startProactivePolling() {
+    if (proactivePolling) return;
+    
+    proactivePolling = true;
+    
+    // Check every 30 seconds when idle
+    const pollInterval = setInterval(() => {
+        const timeSinceActivity = Date.now() - lastActivityTime;
+        const idleThreshold = 30000; // 30 seconds
+        
+        if (timeSinceActivity >= idleThreshold) {
+            checkProactiveMessages();
+        }
+    }, 30000);
+    
+    // Also check immediately after conversations
+    setTimeout(checkProactiveMessages, 5000);
+}
+
+// Update activity time whenever user interacts
+function updateActivity() {
+    lastActivityTime = Date.now();
+}
+
+// Internal thoughts panel functions
+function initializeThoughtsPanel() {
+    thoughtsPanel = document.getElementById('thoughts-panel');
+    const toggleBtn = document.getElementById('thoughts-toggle');
+    const closeBtn = document.getElementById('thoughts-close');
+    
+    toggleBtn.addEventListener('click', toggleThoughtsPanel);
+    closeBtn.addEventListener('click', closeThoughtsPanel);
+}
+
+function toggleThoughtsPanel() {
+    if (thoughtsVisible) {
+        closeThoughtsPanel();
+    } else {
+        openThoughtsPanel();
+    }
+}
+
+function openThoughtsPanel() {
+    thoughtsPanel.style.display = 'flex';
+    thoughtsPanel.classList.add('open');
+    thoughtsVisible = true;
+    loadInternalThoughts();
+}
+
+function closeThoughtsPanel() {
+    thoughtsPanel.classList.remove('open');
+    thoughtsVisible = false;
+    setTimeout(() => {
+        thoughtsPanel.style.display = 'none';
+    }, 300);
+}
+
+async function loadInternalThoughts() {
+    const content = document.getElementById('thoughts-content');
+    content.innerHTML = '<div class="loading">Loading thoughts...</div>';
+    
+    try {
+        const response = await fetch('/api/thoughts?limit=15');
+        if (response.ok) {
+            const data = await response.json();
+            displayThoughts(data.thoughts);
+        } else {
+            content.innerHTML = '<div class="loading">Failed to load thoughts</div>';
+        }
+    } catch (error) {
+        console.error('Error loading thoughts:', error);
+        content.innerHTML = '<div class="loading">Error loading thoughts</div>';
+    }
+}
+
+function displayThoughts(thoughts) {
+    const content = document.getElementById('thoughts-content');
+    
+    if (!thoughts || thoughts.length === 0) {
+        content.innerHTML = '<div class="loading">No thoughts yet... Carlos is still learning!</div>';
+        return;
+    }
+    
+    content.innerHTML = '';
+    
+    thoughts.forEach(thought => {
+        const thoughtDiv = document.createElement('div');
+        thoughtDiv.className = `thought-item ${thought.source || 'internal'}`;
+        
+        const timestamp = new Date(thought.timestamp).toLocaleTimeString();
+        const urgencyColor = getUrgencyColor(thought.urgency || 0.5);
+        
+        if (thought.source === 'cyclical') {
+            // Display cyclical thinking chain with more detail
+            const cycles = thought.thinking_cycles || [];
+            const cyclesHtml = cycles.slice(0, 3).map((cycle, idx) => 
+                `<div class="thinking-cycle">
+                    <strong>Cycle ${cycle.cycle || idx + 1}:</strong> ${cycle.observation || ''}
+                    ${cycle.connection ? `<br><em>→ ${cycle.connection}</em>` : ''}
+                </div>`
+            ).join('');
+            
+            thoughtDiv.innerHTML = `
+                <div class="thought-meta">
+                    <span class="thought-type cyclical">🔄 cyclical (${thought.depth || 1} levels)</span>
+                    <span class="thought-urgency" style="color: ${urgencyColor}">
+                        ${(thought.urgency * 100).toFixed(0)}% ${timestamp}
+                    </span>
+                </div>
+                <div class="thought-insight">${thought.insight || 'Processing...'}</div>
+                ${cyclesHtml ? `<div class="thinking-cycles">${cyclesHtml}</div>` : ''}
+                ${thought.synthesis ? `<div class="synthesis"><strong>Synthesis:</strong> ${thought.synthesis}</div>` : ''}
+                ${thought.suggested_step ? `<div class="thought-step">${thought.suggested_step}</div>` : ''}
+            `;
+        } else {
+            // Regular internal thought display
+            thoughtDiv.innerHTML = `
+                <div class="thought-meta">
+                    <span class="thought-type">${thought.original_context || 'analysis'}</span>
+                    <span class="thought-urgency" style="color: ${urgencyColor}">
+                        ${(thought.urgency * 100).toFixed(0)}% ${timestamp}
+                    </span>
+                </div>
+                <div class="thought-insight">${thought.insight || 'Processing...'}</div>
+                ${thought.suggested_step ? `<div class="thought-step">${thought.suggested_step}</div>` : ''}
+            `;
+        }
+        
+        content.appendChild(thoughtDiv);
+    });
+}
+
+function getUrgencyColor(urgency) {
+    if (urgency >= 0.8) return '#ef4444'; // High urgency - red
+    if (urgency >= 0.6) return '#f59e0b'; // Medium urgency - orange  
+    if (urgency >= 0.4) return '#eab308'; // Low-medium urgency - yellow
+    return '#9fb3c8'; // Low urgency - muted
 }
 
 async function streamWelcomeMessage() {
@@ -99,6 +287,9 @@ async function streamWelcomeMessage() {
                                 assistantBubble = addBubble('', 'assistant');
                             }
                             assistantBubble.appendChild(addEmote(data.name));
+                        } else if (eventName === 'proactive') {
+                            hideStatus();
+                            addProactiveBubble(data.message);
                         } else if (eventName === 'error' || eventName === 'close') {
                             hideStatus();
                         }
@@ -125,6 +316,7 @@ form.addEventListener('submit', async (e) => {
     const message = input.value.trim();
     if (!message) return;
 
+    updateActivity(); // Track user activity
     addBubble(message, 'user');
     input.value = '';
     input.style.height = 'auto';
@@ -183,6 +375,9 @@ form.addEventListener('submit', async (e) => {
                             }
                             assistantBubble.appendChild(addEmote(data.name));
                             chat.scrollTop = chat.scrollHeight;
+                        } else if (eventName === 'proactive') {
+                            hideStatus();
+                            addProactiveBubble(data.message);
                         } else if (eventName === 'status') {
                             showStatus(data.message);
                         } else if (eventName === 'close' || eventName === 'error') {
@@ -199,11 +394,25 @@ form.addEventListener('submit', async (e) => {
     } finally {
         sendBtn.disabled = false;
         input.focus();
+        // Check for proactive messages after conversation ends
+        setTimeout(checkProactiveMessages, 3000);
     }
 });
 
-// Helper to resize textarea
+// Helper to resize textarea and track activity
 input.addEventListener('input', () => {
     input.style.height = 'auto';
     input.style.height = input.scrollHeight + 'px';
+    updateActivity(); // Track typing as activity
 });
+
+// Start proactive polling when page loads
+document.addEventListener('DOMContentLoaded', () => {
+    startProactivePolling();
+    initializeThoughtsPanel();
+});
+
+// Also start after welcome message if new session
+if (isNewSession) {
+    setTimeout(startProactivePolling, 2000);
+}

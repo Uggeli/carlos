@@ -51,6 +51,19 @@ class CarlosDatabaseHandler:
             user_state = self.get_collection("user_state")
             user_state.create_index([("user_id", 1)])
             
+            # Active thoughts collection indexes
+            active_thoughts = self.get_collection("active_thoughts")
+            active_thoughts.create_index([("timestamp", DESCENDING)])
+            active_thoughts.create_index([("shard_id", 1)])
+            active_thoughts.create_index([("status", 1)])
+            active_thoughts.create_index([("urgency", DESCENDING)])
+            
+            # Thinking chains collection indexes
+            thinking_chains = self.get_collection("thinking_chains")
+            thinking_chains.create_index([("timestamp", DESCENDING)])
+            thinking_chains.create_index([("confidence", DESCENDING)])
+            thinking_chains.create_index([("novel_insight", "text")])
+            
             logger.info("Database indexes created successfully")
         except Exception as e:
             logger.warning(f"Index creation warning: {e}")

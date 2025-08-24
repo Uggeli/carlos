@@ -21,8 +21,11 @@
           {% endif %}
         </div>
       </div>
-      <div style="margin-top: 8px;">
+      <div style="margin-top: 8px; display: flex; gap: 12px;">
         <a href="/debug" style="color: #9fb3c8; text-decoration: none; font-size: 14px;">🔧 Debug Mode</a>
+        <button id="thoughts-toggle" style="background: none; border: none; color: #9fb3c8; cursor: pointer; font-size: 14px; padding: 0;">
+          🧠 Internal Thoughts
+        </button>
       </div>
     </header>
 
@@ -31,6 +34,16 @@
       <div class="bubble assistant">{{ initial_reply }}</div>
       {% endif %}
     </main>
+
+    <div id="thoughts-panel" class="thoughts-panel" style="display: none;">
+      <div class="thoughts-header">
+        <h3>🧠 Carlos's Internal Thoughts</h3>
+        <button id="thoughts-close" class="thoughts-close">×</button>
+      </div>
+      <div id="thoughts-content" class="thoughts-content">
+        <div class="loading">Loading thoughts...</div>
+      </div>
+    </div>
 
     <form id="composer" class="composer" autocomplete="off">
       <div>

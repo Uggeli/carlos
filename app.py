@@ -82,7 +82,9 @@ def logout():
     username = session.pop('username', None)
     try:
         if username and username in _CARLOS_INSTANCES:
-            # Best-effort cleanup; Carlos doesn't expose close, so just drop ref
+            # Properly shutdown autonomous shards
+            carlos_instance = _CARLOS_INSTANCES[username]
+            carlos_instance.shutdown()
             _CARLOS_INSTANCES.pop(username, None)
     finally:
         return redirect(url_for('login'))
@@ -136,6 +138,47 @@ def api_chat_stream():
     except Exception as e:
         print(f"/api/chat/stream error: {e}")
         return jsonify({"error": "Failed to get response"}), 500
+
+@app.route('/api/proactive', methods=['GET'])
+def api_proactive():
+    """Check for proactive messages from autonomous shards"""
+    try:
+        carlos: Carlos = getattr(g, 'carlos', None)
+        if carlos is None:
+            return jsonify({"error": "Unauthorized"}), 401
+        
+        proactive_message = carlos.check_proactive_messages()
+        if proactive_message:
+            return jsonify({"message": proactive_message, "has_message": True})
+        else:
+            return jsonify({"has_message": False})
+    
+    except Exception as e:
+        print(f"/api/proactive error: {e}")
+        return jsonify({"error": "Failed to check proactive messages"}), 500
+
+@app.route('/api/thoughts', methods=['GET'])
+def api_internal_thoughts():
+    """Get internal thoughts for monitoring panel"""
+    try:
+        carlos: Carlos = getattr(g, 'carlos', None)
+        if carlos is None:
+            return jsonify({"error": "Unauthorized"}), 401
+        
+        limit = int(request.args.get('limit', 20))
+        thoughts = carlos.get_internal_thoughts(limit)
+        
+        # Convert ObjectId and datetime for JSON serialization
+        from bson import ObjectId
+        from carlos import MongoJSONEncoder
+        import json
+        
+        serialized_thoughts = json.loads(json.dumps(thoughts, cls=MongoJSONEncoder))
+        return jsonify({"thoughts": serialized_thoughts})
+    
+    except Exception as e:
+        print(f"/api/thoughts error: {e}")
+        return jsonify({"error": "Failed to get internal thoughts"}), 500
 
 
 if __name__ == '__main__':
