@@ -42,6 +42,14 @@
      font-weight: 600;
  }
 
+ .logo {
+     transition: transform 0.2s ease;
+ }
+
+ .logo:hover {
+     transform: scale(1.05);
+ }
+
  .chat {
      padding: 16px;
      overflow-y: auto;

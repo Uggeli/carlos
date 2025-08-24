@@ -4,14 +4,17 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Carlos Chat</title>
-  <link rel="icon" href="/static/favicon.png">
+  <link rel="icon" href="/static/images/favicon.png" type="image/png">
   <link rel="stylesheet" href="/static/styles.css">
 </head>
 <body data-is-new-session="{{ is_new_session }}">
   <div class="container">
     <header>
       <div style="display:flex; justify-content: space-between; align-items: center; gap: 12px;">
-        <h1 style="margin:0;">Carlos Chat</h1>
+        <div style="display:flex; align-items: center; gap: 12px;">
+          <img src="/static/images/carlos_logo.png" alt="Carlos Logo" class="logo" style="width: 32px; height: 32px; border-radius: 6px;">
+          <h1 style="margin:0;">Carlos Chat</h1>
+        </div>
         <div style="display:flex; align-items:center; gap: 10px; color:#9fb3c8; font-size:14px;">
           {% if username %}
             <span>Signed in as <strong style="color:#e6edf3;">{{ username }}</strong></span>

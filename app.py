@@ -19,11 +19,6 @@ def static_files(path):
     """Serve static files from the 'static' directory."""
     return app.send_static_file(path)
 
-@app.route('/favicon.ico')
-def favicon():
-    """Serve the favicon."""
-    return app.send_static_file('favicon.ico')
-
 @app.route('/robots.txt')
 def robots():
     """Serve the robots.txt file."""
