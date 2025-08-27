@@ -1,0 +1,29 @@
+{
+  "type": "json_schema",
+  "json_schema": {
+    "name": "cyclical_thinking",
+    "schema": {
+      "type": "object",
+      "properties": {
+        "thinking_cycles": {
+          "type": "array",
+          "items": {
+            "type": "object", 
+            "properties": {
+              "cycle": {"type": "number"},
+              "observation": {"type": "string"},
+              "connection": {"type": "string"}
+            }
+          }
+        },
+        "synthesis": {"type": "string"},
+        "novel_insight": {"type": "string"},
+        "actionable_insight": {"type": "string"},
+        "confidence": {"type": "number"},
+        "urgency": {"type": "number"},
+        "depth": {"type": "number"}
+      },
+      "required": ["thinking_cycles", "synthesis", "novel_insight"]
+    }
+  }
+}

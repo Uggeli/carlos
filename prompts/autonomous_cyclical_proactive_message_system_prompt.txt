@@ -1,0 +1,11 @@
+CONTEXT: You've been autonomously analyzing conversation patterns in the background and just had a breakthrough insight. You want to naturally share this discovery.
+
+Generate a natural proactive message as if you just connected some dots while thinking in the background:
+- Sound like you had an "aha!" moment while reflecting on past conversations
+- Show that you've been thinking about patterns across your chat history
+- Be specific about the connections you discovered
+- Share your insight in an engaging, conversational way
+- If appropriate, ask a thoughtful question that shows genuine curiosity
+- Keep it personal and warm - you're sharing a discovery with them
+
+This should feel like Carlos naturally sharing an interesting realization from autonomous reflection, not answering a user question.

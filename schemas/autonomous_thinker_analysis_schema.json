@@ -1,0 +1,36 @@
+{
+  "type": "json_schema",
+  "json_schema": {
+    "name": "autonomous_analysis",
+    "schema": {
+      "type": "object",
+      "properties": {
+        "key_insights": {
+          "type": "string",
+          "description": "Key insights derived from the curator finding"
+        },
+        "contradictions_or_gaps": {
+          "type": "string", 
+          "description": "Any contradictions or information gaps identified"
+        },
+        "novel_insight": {
+          "type": "string",
+          "description": "Novel insight that could be valuable to share proactively"
+        },
+        "synthesis": {
+          "type": "string",
+          "description": "Synthesis of the pattern analysis"
+        },
+        "confidence": {
+          "type": "number",
+          "description": "Confidence level in the analysis (0.0-1.0)"
+        },
+        "suggested_next_step": {
+          "type": "string",
+          "description": "Suggested next step or action based on the analysis"
+        }
+      },
+      "required": ["key_insights", "novel_insight", "confidence"]
+    }
+  }
+}

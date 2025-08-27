@@ -1,0 +1,46 @@
+{
+    "type": "json_schema",
+    "json_schema": {
+        "name": "thinker_request_schema",
+        "strict": true,
+        "schema": {
+            "type": "object",
+            "properties": {
+                "is_context_sufficient": {
+                    "type": "boolean"
+                },
+                "information_request": {
+                    "type": "string"
+                },
+                "reasoning": {
+                    "type": "string"
+                },
+                "intermediate_insights": {
+                    "type": "string"
+                },
+                "cassandra_flags": {
+                    "type": "array",
+                    "description": "Topics flagged for deeper, asynchronous analysis by the Cassandra engine.",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "topic": {"type": "string"},
+                            "reason_for_flagging": {"type": "string"},
+                            "initial_questions": {
+                                "type": "array",
+                                "items": {"type": "string"}
+                            }
+                        },
+                        "required": ["topic", "reason_for_flagging"]
+                    }
+                }
+            },
+            "required": [
+                "is_context_sufficient",
+                "information_request",
+                "reasoning",
+                "cassandra_flags"
+            ]
+        }
+    }
+}
