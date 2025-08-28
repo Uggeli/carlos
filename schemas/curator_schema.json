@@ -1,0 +1,47 @@
+{
+    "type": "json_schema",
+    "json_schema": {
+        "name": "curator_query_schema",
+        "strict": true,
+        "schema": {
+            "type": "object",
+            "properties": {
+                "queries_to_execute": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "query_type": {
+                                "type": "string",
+                                "enum": ["search_by_tags", "hybrid_search"]
+                            },
+                            "parameters": {
+                                "type": "object",
+                                "properties": {
+                                    "tags": {
+                                        "type": "array",
+                                        "items": {"type": "string"}
+                                    },
+                                    "time_filter": {
+                                        "type": "string",
+                                        "enum": ["last_hour", "today", "this_week", "this_month", "all_time"]
+                                    }
+                                }
+                            }
+                        }
+                    }
+                },
+                "insights_to_store": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {  
+                            "insight_text": {"type": "string"}
+                        }
+                    }
+                }
+            },
+            "required": ["queries_to_execute", "insights_to_store"]
+        }
+    }
+}

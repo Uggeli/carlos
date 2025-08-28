@@ -9,9 +9,16 @@
           "type": "string",
           "description": "Concise summary of the input text, maximum 50 words",
           "maxLength": 300
+        },
+        "tags": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "List of relevant tags or keywords extracted from the input text"
         }
       },
-      "required": ["summary"],
+      "required": ["summary", "tags"],
       "additionalProperties": false
     },
     "strict": true
