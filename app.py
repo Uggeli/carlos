@@ -1,181 +1,129 @@
-from flask import Flask, Response, render_template, request, jsonify, session, g, redirect, url_for
 from carlos import Carlos
-import os
-
+from flask import Flask, render_template, Response, g, request
 import logging
+
 # Configure logging
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
 app = Flask(__name__)
-# Secret key required for Flask sessions; in production set via environment
-app.secret_key = os.environ.get("SECRET_KEY", "dev-secret-change-me")
 
-# In-memory cache of Carlos instances keyed by username (simple for now)
-_CARLOS_INSTANCES = {}
+CARLOS_INSTANCES = []
+
+carlos_instance = Carlos(
+	api_endpoint="http://localhost:1234",
+	db_uri="mongodb://localhost:27017",  
+	user_name="test_user"
+	)
 
 
-@app.route('/static/<path:path>')
-def static_files(path):
-    """Serve static files from the 'static' directory."""
-    return app.send_static_file(path)
+@app.route('/favicon.ico', methods=['GET'])
+def favicon():
+	return '', 200
 
-@app.route('/robots.txt')
-def robots():
-    """Serve the robots.txt file."""
-    return app.send_static_file('robots.txt')
-
-@app.before_request
-def before_request():
-    """Authenticate user before processing request, except for open paths."""
-    logging.info(f"Request: {request.method} {request.path} - {request.remote_addr}")
-    open_paths = {"/login", "/favicon.ico", "/robots.txt"}
-    is_static = request.path.startswith("/static/")
-    if request.path not in open_paths and not is_static:
-        username = session.get("username")
-        if not username:
-            if request.path.startswith("/api/"):
-                return jsonify({"error": "Unauthorized"}), 401
-            return redirect(url_for("login", next=request.path))
-
-        g.username = username
-        if username not in _CARLOS_INSTANCES:
-            _CARLOS_INSTANCES[username] = Carlos(username=username)
-        g.carlos = _CARLOS_INSTANCES[username]
-
-@app.get('/')
+@app.route('/')
 def index():
-    initial_reply = session.pop('welcome_reply', None)
-    # Pass a flag to the template to indicate if it's a new session
-    is_new_session = session.pop('is_new_session', False)
-    return render_template('chat.html', username=session.get('username'), initial_reply=initial_reply, is_new_session=is_new_session)
-
+    return render_template('index.html')
 
 @app.route('/login', methods=['GET', 'POST'])
 def login():
-    """Very simple name capture to start a session."""
-    if request.method == 'POST':
-        name = (request.form.get('name') or '').strip()
-        if not name:
-            return render_template('login.html', error="Please enter your name.")
-        
-        session['username'] = name
-        session.permanent = True
-        
-        # Set a flag to signal the frontend to stream the welcome message
-        session['is_new_session'] = True
-        
-        if name not in _CARLOS_INSTANCES:
-            _CARLOS_INSTANCES[name] = Carlos(username=name)
-        
-        next_url = request.args.get('next') or url_for('index')
-        return redirect(next_url)
-    return render_template('login.html')
+    # Implement login logic here
+	return "Login Page"
 
-@app.route('/logout', methods=['GET', 'POST'])
+@app.route('/logout')
 def logout():
-    """Clear session and optional in-memory Carlos instance."""
-    username = session.pop('username', None)
-    try:
-        if username and username in _CARLOS_INSTANCES:
-            # Properly shutdown autonomous shards
-            carlos_instance = _CARLOS_INSTANCES[username]
-            carlos_instance.shutdown()
-            _CARLOS_INSTANCES.pop(username, None)
-    finally:
-        return redirect(url_for('login'))
+	# Implement logout logic here
+	return "Logout Page"
 
-@app.route('/api/welcome/stream', methods=['GET'])
-def api_welcome_stream():
-    try:
-        carlos: Carlos = getattr(g, 'carlos', None)
-        if carlos is None:
-            return jsonify({"error": "Unauthorized"}), 401
-        
-        # Craft a special prompt for the welcome message
-        welcome_prompt = f"{g.username} has just logged in! Please greet them warmly."
-        
-        return Response(carlos.chat_stream(welcome_prompt), content_type='text/event-stream')
-
-    except Exception as e:
-        print(f"/api/welcome/stream error: {e}")
-        return jsonify({"error": "Failed to get welcome message"}), 500
-    
-@app.post('/api/chat')
-def api_chat():
-    data = request.get_json(silent=True) or {}
-    message = (data.get('message') or '').strip()
-    if not message:
-        return jsonify({"error": "message is required"}), 400
-    try:
-        carlos = getattr(g, 'carlos', None)
-        if carlos is None:
-            return jsonify({"error": "Unauthorized"}), 401
-        reply = carlos.chat(message)
-        return jsonify({"reply": reply})
-    except Exception as e:
-        # Keep error simple for client; log details server-side
-        # In real app, use proper logging
-        print(f"/api/chat error: {e}")
-        return jsonify({"error": "Failed to get response"}), 500
-
-@app.route('/api/chat/stream', methods=['GET', 'POST'])
-def api_chat_stream():
-    data = request.get_json(silent=True) or {}
-    message = (data.get('message') or '').strip()
-    if not message:
-        return jsonify({"error": "message is required"}), 400
-    try:
-        carlos: Carlos = getattr(g, 'carlos', None)
-        if carlos is None:
-            return jsonify({"error": "Unauthorized"}), 401
-        return Response(carlos.chat_stream(message), content_type='text/event-stream')
-
-    except Exception as e:
-        print(f"/api/chat/stream error: {e}")
-        return jsonify({"error": "Failed to get response"}), 500
-
-@app.route('/api/proactive', methods=['GET'])
-def api_proactive():
-    """Check for proactive messages from autonomous shards"""
-    try:
-        carlos: Carlos = getattr(g, 'carlos', None)
-        if carlos is None:
-            return jsonify({"error": "Unauthorized"}), 401
-        
-        proactive_message = carlos.check_proactive_messages()
-        if proactive_message:
-            return jsonify({"message": proactive_message, "has_message": True})
-        else:
-            return jsonify({"has_message": False})
-    
-    except Exception as e:
-        print(f"/api/proactive error: {e}")
-        return jsonify({"error": "Failed to check proactive messages"}), 500
-
-@app.route('/api/thoughts', methods=['GET'])
-def api_internal_thoughts():
-    """Get internal thoughts for monitoring panel"""
-    try:
-        carlos: Carlos = getattr(g, 'carlos', None)
-        if carlos is None:
-            return jsonify({"error": "Unauthorized"}), 401
-        
-        limit = int(request.args.get('limit', 20))
-        thoughts = carlos.get_internal_thoughts(limit)
-        
-        # Convert ObjectId and datetime for JSON serialization
-        from bson import ObjectId
-        from carlos import MongoJSONEncoder
-        import json
-        
-        serialized_thoughts = json.loads(json.dumps(thoughts, cls=MongoJSONEncoder))
-        return jsonify({"thoughts": serialized_thoughts})
-    
-    except Exception as e:
-        print(f"/api/thoughts error: {e}")
-        return jsonify({"error": "Failed to get internal thoughts"}), 500
-
-
+@app.route('/stream', methods=['GET', 'POST'])
+def stream():
+	prompt = request.args.get('prompt', 'Default prompt')
+	if not prompt:
+		return Response("data: {\"error\": \"No prompt provided\"}\n\n", mimetype='text/event-stream')
+	
+	import json
+	import asyncio
+	import logging
+	
+	def generate():
+		loop = None
+		try:
+			# Create a new event loop for this request
+			loop = asyncio.new_event_loop()
+			asyncio.set_event_loop(loop)
+			logging.info(f"Event loop created for streaming request: {id(loop)}")
+			
+			async def run_stream():
+				try:
+					async for data in carlos_instance.stream_response(prompt):
+						# Check if this is the done signal
+						if data.get('status') == '[DONE]':
+							yield f"data: {json.dumps(data)}\n\n"
+							return
+						else:
+							yield f"data: {json.dumps(data)}\n\n"
+				except Exception as e:
+					logging.error(f"Stream error: {e}")
+					yield f"data: {json.dumps({'status': 'error', 'message': str(e)})}\n\n"
+			
+			# Run the async generator synchronously
+			async_gen = run_stream()
+			
+			try:
+				while True:
+					try:
+						# Get next chunk from async generator
+						chunk = loop.run_until_complete(async_gen.__anext__())
+						yield chunk
+						
+						# Check if we just sent the [DONE] signal
+						if '"status": "[DONE]"' in chunk:
+							logging.info("Stream completed successfully")
+							break
+							
+					except StopAsyncIteration:
+						logging.info("Stream completed via StopAsyncIteration")
+						break
+						
+			except Exception as gen_error:
+				logging.error(f"Generator error: {gen_error}")
+				yield f"data: {json.dumps({'status': 'error', 'message': f'Generator error: {str(gen_error)}'})}\n\n"
+					
+		except Exception as e:
+			logging.error(f"Stream setup error: {e}")
+			yield f"data: {json.dumps({'status': 'error', 'message': f'Server error: {str(e)}'})}\n\n"
+		finally:
+			# Always clean up the event loop
+			if loop:
+				try:
+					# Close any remaining tasks
+					if not loop.is_closed():
+						# Cancel any pending tasks
+						pending = asyncio.all_tasks(loop)
+						if pending:
+							logging.info(f"Cancelling {len(pending)} pending tasks")
+							for task in pending:
+								task.cancel()
+							# Wait for tasks to complete cancellation
+							loop.run_until_complete(asyncio.gather(*pending, return_exceptions=True))
+						
+						logging.info(f"Closing event loop: {id(loop)}")
+						loop.close()
+				except Exception as cleanup_error:
+					logging.error(f"Error cleaning up event loop: {cleanup_error}")
+			
+			# Clear the event loop from thread-local storage
+			try:
+				asyncio.set_event_loop(None)
+			except Exception:
+				pass
+	
+	response = Response(generate(), mimetype='text/event-stream')
+	response.headers['Cache-Control'] = 'no-cache' 
+	response.headers['Connection'] = 'keep-alive'
+	response.headers['X-Accel-Buffering'] = 'no'  # Disable nginx buffering
+	return response
+	
+	
 if __name__ == '__main__':
-    port = int(os.environ.get("PORT", 5000))
-    app.run(host="0.0.0.0", port=port, debug=True)
+	app.run(debug=True)

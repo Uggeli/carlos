@@ -1,4 +1,4 @@
-from random import Random
+import random
 import re
 from bson import ObjectId
 import httpx
@@ -29,10 +29,9 @@ class LlmAgent:
     def __init__(self, api_endpoint: str, model_name: str = 'carlos'):
         self.api_endpoint = api_endpoint
         self.model_name = model_name
-        self.client = httpx.AsyncClient(timeout=60.0)
 
-    async def _call_llm(self, messages: list, schema: Optional[dict] = None, temperature: float = 0.7, max_tokens: int = -1, stream: bool = False) -> dict:
-        """Call the LLM API with given messages and return the response."""
+    async def _call_llm(self, messages: list, schema: Optional[dict] = None, temperature: float = 0.7, max_tokens: int = -1, stream: bool = False):
+        """Call the LLM API; if stream=True return an async generator of content chunks, else return parsed dict."""
         payload = {
             "model": self.model_name,
             "messages": messages,
@@ -42,23 +41,55 @@ class LlmAgent:
         }
         if schema:
             payload["response_format"] = schema
-        headers = {
-            "Content-Type": "application/json"
-        }
+        headers = {"Content-Type": "application/json"}
+        url = f"{self.api_endpoint}/v1/chat/completions"
 
-        try:
-            response = await self.client.post(f"{self.api_endpoint}/v1/chat/completions", headers=headers, json=payload, timeout=60)
-            response.raise_for_status()
-            result = response.json()
-            content_str = result.get("choices", [{}])[0].get("message", {}).get("content", "")
-            return json.loads(content_str) 
-        except requests.RequestException as e:
-            logger.error(f"LLM API request failed: {e}")
-            raise
-        except json.JSONDecodeError as e:
-            logger.error("Failed to parse LLM response: {e}")
-            logger.debug(f"Raw response content: {response.text}")
-            return {}
+        if stream:
+            async def streamer():
+                try:
+                    # Create fresh client for each streaming request
+                    async with httpx.AsyncClient(timeout=60.0) as client:
+                        async with client.stream("POST", url, headers=headers, json=payload, timeout=60) as resp:
+                            resp.raise_for_status()
+                            async for line in resp.aiter_lines():
+                                if not line:
+                                    continue
+                                data_str = line
+                                if data_str.startswith("data:"):
+                                    data_str = data_str[len("data:"):].strip()
+                                if not data_str or data_str == "[DONE]":
+                                    continue
+                                try:
+                                    obj = json.loads(data_str)
+                                    choices = obj.get("choices", [])
+                                    if choices:
+                                        delta = choices[0].get("delta", {}) or choices[0].get("message", {})
+                                        chunk = delta.get("content")
+                                        if chunk:
+                                            yield chunk
+                                except json.JSONDecodeError:
+                                    # Fallback to raw text
+                                    yield data_str
+                except httpx.HTTPError as e:
+                    logger.error(f"LLM streaming request failed: {e}")
+                    return
+            return streamer()
+        else:
+            try:
+                # Create fresh client for each non-streaming request
+                async with httpx.AsyncClient(timeout=60.0) as client:
+                    response = await client.post(url, headers=headers, json=payload, timeout=60)
+                    response.raise_for_status()
+                    result = response.json()
+                    content_str = result.get("choices", [{}])[0].get("message", {}).get("content", "")
+                    try:
+                        return json.loads(content_str)
+                    except json.JSONDecodeError as e:
+                        logger.debug(f"Non-JSON content returned: {content_str[:100]}")
+                        return {"response_text": content_str}
+            except httpx.HTTPError as e:
+                logger.error(f"LLM API request failed: {e}")
+                raise
 
 
 class CuratorAgent(LlmAgent):
@@ -105,7 +136,7 @@ class GeneratorAgent(LlmAgent):
         self.system_prompt = system_prompt
         self.schema = schema
 
-    async def run(self, message: str, think_data: dict, timestamp: str) -> str:
+    async def run(self, message: str, think_data: dict, timestamp: str):
         """Generate a response based on thinker insights."""
         messages = [
             {"role": "system", "content": self.system_prompt},
@@ -114,7 +145,7 @@ class GeneratorAgent(LlmAgent):
             {"role": "user", "content": f"Original user message: {message}"}
         ]
         response = await self._call_llm(messages, schema=self.schema, temperature=0.7)
-        return response.get("response_text", "I'm not sure how to respond to that right now.")
+        return response
     
     async def stream(self, message: str, think_data: dict, timestamp: str):
         """Stream a response based on thinker insights."""
@@ -124,7 +155,8 @@ class GeneratorAgent(LlmAgent):
             {"role": "system", "content": f"Current time is {timestamp}"},
             {"role": "user", "content": f"Original user message: {message}"}
         ]
-        async for chunk in self._call_llm(messages, schema=self.schema, temperature=0.7, stream=True):
+        agen = await self._call_llm(messages, schema=None, temperature=0.7, stream=True)
+        async for chunk in agen:
             yield chunk
     
 
@@ -402,7 +434,6 @@ class Carlos:
         self.db_uri = db_uri
         self.user_name = user_name
 
-        self.http_client = httpx.AsyncClient(timeout=30.0)
         self.db_handler = CarlosDatabaseHandler(db_uri, user_name)
     
         # Load prompts and schemas
@@ -417,11 +448,12 @@ class Carlos:
         payload = { "model": "text-embedding-nomic-embed-text-v1.5", "input": text }
         headers = { "Content-Type": "application/json" }
         try:
-            # Use the async client with 'await'
-            response = await self.http_client.post(f"{self.api_endpoint}/v1/embeddings", headers=headers, json=payload)
-            response.raise_for_status()
-            result = response.json()
-            return result.get("data", [{}])[0].get("embedding", [])
+            # Create fresh client for embedding request
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                response = await client.post(f"{self.api_endpoint}/v1/embeddings", headers=headers, json=payload)
+                response.raise_for_status()
+                result = response.json()
+                return result.get("data", [{}])[0].get("embedding", [])
         except httpx.RequestError as e:
             logger.error(f"Embedding API request failed: {e}")
             return []
@@ -456,13 +488,11 @@ class Carlos:
     
     async def close(self):
         """Close any open resources."""
-        await self.http_client.aclose()
-        await self.curator_agent.client.aclose()
-        await self.thinker_agent.client.aclose()
-        await self.generator_agent.client.aclose()
-        await self.summarizer_agent.client.aclose()
+        # No persistent httpx clients to close anymore
+        # All clients are now created as needed using 'async with' context managers
+        pass
 
-    async def chunk_message(self, message: str, chunk_size: int = 2000) -> List[str]:
+    async def chunk_message(self, message: str, chunk_size: int = 2000) -> tuple[str, list[str]]:
         """Chunk a long message into smaller parts."""
         words = message.split()
         chunks = []
@@ -491,39 +521,13 @@ class Carlos:
 
     async def _pipeline(self, message: str) -> str:
         """Process the message through the full pipeline and return the final response."""
-        # User Input -> Initial Fetch:
-        # The Summarizer generates tags and an embedding from the user's message.
-        # The DatabaseHandler performs the initial hybrid search to get a baseline of relevant context.
-        # Thinker (The Detective 🕵️):
-        # The Thinker receives the user's query and the initial search results.
-        # Its primary job is to analyze this context and identify knowledge gaps. It asks the high-level questions: "This is a good start, but to give a great answer, what else do I need to know? What's missing? What's contradictory?"
-        # It then formulates an "information request" for the Curator.
-        # Curator (The Librarian 📚):
-        # The Curator receives the Thinker's specific information request.
-        # Its job is purely tactical: translate the Thinker's request into concrete database queries and execute them. It's the expert at finding things in the database.
-        # It can also store any intermediate insights the Thinker generates.
-        # The Loop:
-        # The Curator returns the new information to the Thinker.
-        # The Thinker re-evaluates the now-richer context. If it's satisfied, it proceeds. If not, it can ask the Curator for even more information.
-        # Response & Storage:
-        # Once the Thinker has a complete picture, it passes its final, synthesized context to the Generator.
-        # The Generator creates the final response.
-        # The entire exchange is then stored in the database
-        
-        
+        timestamp = datetime.now(timezone.utc).isoformat()
         if len(message) > 4000:
             summary, tags = await self.chunk_message(message)
             logger.debug(f"Message was chunked. Summary: {summary}, Tags: {tags}")
-
         else:
-            timestamp = datetime.now(timezone.utc).isoformat()
-            
             summary, tags = await self.summarizer_agent.run(message)
             logger.debug(f"Summarizer output - Summary: {summary}, Tags: {tags}")
-            # query_vector = await self._fetch_embeddings(message)
-
-            # search_results = self.db_handler.search(tags, query_vector, top_k=5)
-            # logger.debug(f"Search results: {search_results}")
 
         query_vector = await self._fetch_embeddings(summary)
         max_thinker_loops = 5
@@ -534,6 +538,7 @@ class Carlos:
             "summary": summary,
             "tags": tags
         }
+        logger.debug(f"Initial thinker context: {thinker_context}")
 
         while thinker_loop < max_thinker_loops:
             thinker_loop += 1
@@ -551,17 +556,15 @@ class Carlos:
             if is_context_sufficient:
                 logger.debug("Thinker determined context is sufficient.")
                 break
-            
+
             queries_to_execute, insights_to_store = await self.curator_agent.run(information_request)
             logger.debug(f"Curator output - Queries: {queries_to_execute}, Insights: {insights_to_store}")
             if insights_to_store:
-                # Store insights in the insights collection
                 for insight in insights_to_store:
                     self.db_handler.insights_col.insert_one({
                         "insight": insight,
                         "timestamp": datetime.now(timezone.utc)
                     })
-            # Execute queries and update thinker_context
             for query in queries_to_execute:
                 query_type = query.get("query_type", "")
                 tags = query.get("tags", [])
@@ -570,7 +573,7 @@ class Carlos:
                     results = self.db_handler.search_by_tags(tags, time_filter, top_k=5)
                     thinker_context.setdefault("search_results", []).extend(results)
                 elif query_type == "hybrid_search":
-                    embedded_vector = self._fetch_embeddings(tags)
+                    embedded_vector = await self._fetch_embeddings(" ".join(tags))
                     results = self.db_handler.search(tags, embedded_vector, time_filter, top_k=5)
                     thinker_context.setdefault("search_results", []).extend(results)
                 else:
@@ -578,11 +581,17 @@ class Carlos:
                     continue
 
             thinker_context.setdefault("reasoning", []).append(reasoning)
+
+        generator_output = await self.generator_agent.run(message, thinker_context, timestamp)
+        logger.debug(f"Generator output: {generator_output}")
+        
+        # Extract response text from structured output
+        if isinstance(generator_output, dict):
+            final_response = generator_output.get("response_text", "I'm not sure how to respond to that right now.")
+        else:
+            final_response = str(generator_output)
             
-        final_response = await self.generator_agent.run(message, thinker_context, timestamp)
-        logger.debug(f"Generator output: {final_response}")
         response_summary, response_tags = await self.summarizer_agent.run(final_response)
-        # Store the entire interaction
         interaction_data = {
             "user_id": self.user_name,
             "user_message": message,
@@ -600,21 +609,16 @@ class Carlos:
     
     async def stream_response(self, message: str):
         """Stream the final response back to the user."""
-        # yield format: {"status": status, "message": anything we want to show the user}
-
-
         yield {"status": "chunking", "message": "Carlos is thinking..."}
         if len(message) > 4000:
             summary, tags = await self.chunk_message(message)
             logger.debug(f"Message was chunked. Summary: {summary}, Tags: {tags}")
-
         else:
             summary, tags = await self.summarizer_agent.run(message)
             logger.debug(f"Summarizer output - Summary: {summary}, Tags: {tags}")
 
-        yield {"status": "embedding", "message": f"Hmm, let me think about that..."}
-        # choose random tags from list of tags for flavor text
-        yield {"status": "searching", "message": f"{Random.choice(tags) if tags else 'Interesting topic'}... let me see what I can find."}
+        yield {"status": "embedding", "message": "Hmm, let me think about that..."}
+        yield {"status": "searching", "message": f"{random.choice(tags) if tags else 'Interesting topic'}... let me see what I can find."}
         query_vector = await self._fetch_embeddings(summary)
         max_thinker_loops = 5
         thinker_loop = 0
@@ -638,23 +642,19 @@ class Carlos:
                 "timestamp": datetime.now(timezone.utc)
             })
 
-
             yield {"status": "thinking", "message": thinker_response.get("reasoning", "Let me think...")}
-                
             if is_context_sufficient:
                 logger.debug("Thinker determined context is sufficient.")
                 break
-            
+
             queries_to_execute, insights_to_store = await self.curator_agent.run(information_request)
             logger.debug(f"Curator output - Queries: {queries_to_execute}, Insights: {insights_to_store}")
             if insights_to_store:
-                # Store insights in the insights collection
                 for insight in insights_to_store:
                     self.db_handler.insights_col.insert_one({
                         "insight": insight,
                         "timestamp": datetime.now(timezone.utc)
                     })
-            # Execute queries and update thinker_context
             for query in queries_to_execute:
                 query_type = query.get("query_type", "")
                 tags = query.get("tags", [])
@@ -663,7 +663,7 @@ class Carlos:
                     results = self.db_handler.search_by_tags(tags, time_filter, top_k=5)
                     thinker_context.setdefault("search_results", []).extend(results)
                 elif query_type == "hybrid_search":
-                    embedded_vector = self._fetch_embeddings(tags)
+                    embedded_vector = await self._fetch_embeddings(" ".join(tags))
                     results = self.db_handler.search(tags, embedded_vector, time_filter, top_k=5)
                     thinker_context.setdefault("search_results", []).extend(results)
                 else:
@@ -676,9 +676,21 @@ class Carlos:
         async for chunk in self.generator_agent.stream(message, thinker_context, datetime.now(timezone.utc).isoformat()):
             final_response += chunk
             yield {"status": "response", "message": chunk}
+        
+        # Get the full response with tone information
+        try:
+            full_response = await self.generator_agent.run(message, thinker_context, datetime.now(timezone.utc).isoformat())
+            # Extract tone if the response contains it in structured format
+            tone = "neutral"  # Default tone
+            if isinstance(full_response, dict):
+                tone = full_response.get("tone_used", "neutral")
+                final_response = full_response.get("response_text", final_response)
+            yield {"status": "tone", "message": tone}
+        except Exception as e:
+            logger.warning(f"Could not extract tone information: {e}")
+            yield {"status": "tone", "message": "neutral"}
 
         response_summary, response_tags = await self.summarizer_agent.run(final_response)
-        # Store the entire interaction
         interaction_data = {
             "user_id": self.user_name,
             "user_message": message,
@@ -692,21 +704,22 @@ class Carlos:
             "analysis": thinker_context
         }
         self.db_handler.store_interaction(interaction_data)
+        yield {"status": "[DONE]"}
         
 
-if __name__ == "__main__":
-    import asyncio
-    logging.basicConfig(level=logging.DEBUG)
+# if __name__ == "__main__":
+#     import asyncio
+#     logging.basicConfig(level=logging.DEBUG)
 
-    carlos = Carlos(
-        api_endpoint="http://localhost:1234",
-        db_uri="mongodb://localhost:27017",  
-        user_name="test_user"
-    )
+#     carlos = Carlos(
+#         api_endpoint="http://localhost:1234",
+#         db_uri="mongodb://localhost:27017",  
+#         user_name="test_user"
+#     )
 
-    async def test():
-        user_message = "Can you help me understand the implications of quantum computing on modern cryptography?"
-        response = await carlos._pipeline(user_message)
-        print("Final Response:", response)
+#     async def test():
+#         user_message = "Can you help me understand the implications of quantum computing on modern cryptography?"
+#         response = await carlos._pipeline(user_message)
+#         print("Final Response:", response)
 
-    asyncio.run(test())
+#     asyncio.run(test())
