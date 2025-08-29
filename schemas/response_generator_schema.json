@@ -6,18 +6,17 @@
         "schema": {
             "type": "object",
             "properties": {
-                "response_text": {
+                "response": {
                     "type": "string",
                     "description": "The final response message to the user, incorporating insights from thinker data and original user message."
                 },
-                "tone_used": {
+                "tone": {
                     "type": "string",
                     "description": "The tone used in the response, reflecting the user's emotional state and context."
                 }
             },
             "required": [
-                "response_text",
-                "tone_used"
+                "response"
             ]
         }
     }

@@ -2,13 +2,9 @@ import random
 import re
 from bson import ObjectId
 import httpx
-import requests
 from datetime import datetime, timedelta, timezone
 import os
 import json
-import asyncio
-import threading
-import time
 from typing import Optional, Dict, Any, List
 import logging
 logger = logging.getLogger(__name__)
@@ -91,6 +87,19 @@ class LlmAgent:
                 logger.error(f"LLM API request failed: {e}")
                 raise
 
+class WebSearchAgent(LlmAgent):
+    """Agent responsible for performing web searches."""
+    def __init__(self, api_endpoint: str, system_prompt: str, schema: dict):
+        super().__init__(api_endpoint)
+        self.system_prompt = system_prompt
+        self.schema = schema
+        
+
+
+
+    async def run(self, query: str) -> dict:
+        pass
+
 
 class CuratorAgent(LlmAgent):
     """Agent responsible for curating and analyzing incoming messages."""
@@ -134,7 +143,8 @@ class GeneratorAgent(LlmAgent):
     def __init__(self, api_endpoint: str, system_prompt: str, schema: dict):
         super().__init__(api_endpoint)
         self.system_prompt = system_prompt
-        self.schema = schema
+        # self.schema = schema
+        self.schema = None
 
     async def run(self, message: str, think_data: dict, timestamp: str):
         """Generate a response based on thinker insights."""
@@ -443,6 +453,18 @@ class Carlos:
         self.generator_agent = GeneratorAgent(api_endpoint, prompts["generator"]["prompt"], prompts["generator"]["schema"])
         self.summarizer_agent = SummarizerAgent(api_endpoint, prompts["summarizer"]["prompt"], prompts["summarizer"]["schema"])
 
+        self.in_response = False
+        self.response = ''
+
+        self.in_tone = False
+        self.tone = ''
+
+        self.in_emote = False
+        self.emote = ''
+
+        self.full_text = ''
+
+
     async def _fetch_embeddings(self, text: str) -> List[float]:
         """Asynchronously fetch embeddings for the given text."""
         payload = { "model": "text-embedding-nomic-embed-text-v1.5", "input": text }
@@ -517,7 +539,6 @@ class Carlos:
             emedding = await self._fetch_embeddings(chunk)
             self.db_handler.store_user_message(chunk, summary, list(chunk_tags), emedding)
         return "".join(summaries), list(tags)
-
 
     async def _pipeline(self, message: str) -> str:
         """Process the message through the full pipeline and return the final response."""
@@ -607,6 +628,40 @@ class Carlos:
         self.db_handler.store_interaction(interaction_data)
         return final_response
     
+    def _format_with_emotes(self, text: str) -> str:
+        self.full_text += text
+
+        if '```' in text:
+            # Filter 
+            return None
+        
+        # Parse Emotes/Actions
+        if '[' in text:
+                # Starting an emote/action
+                self.emote += text
+                self.in_emote = True
+                return None
+        if self.in_emote:
+            if ']' in text:
+                # Ending an emote/action
+                self.emote += text
+                emote_text = self.emote.strip()
+                self.emote = ""
+                self.in_emote = False
+                # Remove any trailing punctuation from the emote text
+                emote_text = re.sub(r'[\.,;:!?]+$', '', emote_text)
+                return {"status": "emote", "message": emote_text}
+            else:
+                # We are inside an emote/action
+                self.emote += text
+                return None
+        
+        if len(self.full_text) < len('{\n  "response":}') or self.full_text.endswith('}'):
+            return None
+
+        return {"status": "response", "message": text}
+
+
     async def stream_response(self, message: str):
         """Stream the final response back to the user."""
         yield {"status": "chunking", "message": "Carlos is thinking..."}
@@ -620,6 +675,8 @@ class Carlos:
         yield {"status": "embedding", "message": "Hmm, let me think about that..."}
         yield {"status": "searching", "message": f"{random.choice(tags) if tags else 'Interesting topic'}... let me see what I can find."}
         query_vector = await self._fetch_embeddings(summary)
+        search_results = self.db_handler.search(tags, query_vector, time_filter='', top_k=5)
+        logger.debug(f"Initial search results: {search_results}")
         max_thinker_loops = 5
         thinker_loop = 0
         thinker_context = {
@@ -662,34 +719,27 @@ class Carlos:
                 if query_type == "search_by_tags":
                     results = self.db_handler.search_by_tags(tags, time_filter, top_k=5)
                     thinker_context.setdefault("search_results", []).extend(results)
+                    logger.info(f"Search by tags results: {results}")
                 elif query_type == "hybrid_search":
                     embedded_vector = await self._fetch_embeddings(" ".join(tags))
                     results = self.db_handler.search(tags, embedded_vector, time_filter, top_k=5)
                     thinker_context.setdefault("search_results", []).extend(results)
+                    logger.info(f"Hybrid search results: {results}")
                 else:
                     logger.warning(f"Unknown query type: {query_type}")
                     continue
 
             thinker_context.setdefault("reasoning", []).append(reasoning)
+            logger.info(f"Updated thinker context: {thinker_context}")
 
         final_response = ""
-        async for chunk in self.generator_agent.stream(message, thinker_context, datetime.now(timezone.utc).isoformat()):
+        async for chunk in self.generator_agent.stream(message, thinker_context, datetime.now(timezone.utc).isoformat()): 
             final_response += chunk
-            yield {"status": "response", "message": chunk}
+            chunk = self._format_with_emotes(chunk)
+            logger.info(chunk)
+            if chunk:
+                yield chunk
         
-        # Get the full response with tone information
-        try:
-            full_response = await self.generator_agent.run(message, thinker_context, datetime.now(timezone.utc).isoformat())
-            # Extract tone if the response contains it in structured format
-            tone = "neutral"  # Default tone
-            if isinstance(full_response, dict):
-                tone = full_response.get("tone_used", "neutral")
-                final_response = full_response.get("response_text", final_response)
-            yield {"status": "tone", "message": tone}
-        except Exception as e:
-            logger.warning(f"Could not extract tone information: {e}")
-            yield {"status": "tone", "message": "neutral"}
-
         response_summary, response_tags = await self.summarizer_agent.run(final_response)
         interaction_data = {
             "user_id": self.user_name,
@@ -704,6 +754,8 @@ class Carlos:
             "analysis": thinker_context
         }
         self.db_handler.store_interaction(interaction_data)
+        self.full_text = ''
+
         yield {"status": "[DONE]"}
         
 

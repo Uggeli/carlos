@@ -3,207 +3,41 @@
 <head>
     <meta charset="UTF-8">
     <title>Carlos AI Assistant</title>
-    <style>
-        body { 
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; 
-            max-width: 800px; 
-            margin: 2em auto; 
-            padding: 0 1em;
-            background-color: #f5f5f5;
-        }
-        .header {
-            text-align: center;
-            margin-bottom: 2em;
-        }
-        .logo {
-            width: 64px;
-            height: 64px;
-            margin-bottom: 1em;
-        }
-        h1 { 
-            color: #333; 
-            margin: 0;
-        }
-        .chat-container {
-            background: white;
-            border-radius: 8px;
-            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
-            overflow: hidden;
-        }
-        .input-area {
-            padding: 1em;
-            border-bottom: 1px solid #eee;
-        }
-        .input-group {
-            display: flex;
-            gap: 1em;
-            align-items: flex-end;
-        }
-        #promptInput { 
-            flex: 1;
-            padding: 0.75em; 
-            border: 2px solid #ddd; 
-            border-radius: 4px;
-            font-size: 16px;
-            resize: vertical;
-            min-height: 60px;
-            font-family: inherit;
-        }
-        #promptInput:focus {
-            outline: none;
-            border-color: #4CAF50;
-        }
-        #sendButton { 
-            padding: 0.75em 1.5em; 
-            background: #4CAF50; 
-            color: white; 
-            border: none; 
-            border-radius: 4px;
-            cursor: pointer;
-            font-size: 16px;
-            white-space: nowrap;
-        }
-        #sendButton:hover:not(:disabled) { 
-            background: #45a049; 
-        }
-        #sendButton:disabled {
-            background: #ccc;
-            cursor: not-allowed;
-        }
-        .status-area {
-            padding: 1em;
-            border-bottom: 1px solid #eee;
-            background: #f8f9fa;
-            display: none;
-        }
-        .status-area.active {
-            display: block;
-        }
-        .stage-indicator {
-            display: flex;
-            align-items: center;
-            gap: 1em;
-            color: #666;
-        }
-        .stage-icon {
-            width: 24px;
-            height: 24px;
-            border-radius: 50%;
-            background: #4CAF50;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            color: white;
-            font-weight: bold;
-            animation: pulse 2s infinite;
-        }
-        @keyframes pulse {
-            0% { opacity: 1; }
-            50% { opacity: 0.5; }
-            100% { opacity: 1; }
-        }
-        .stage-text {
-            font-weight: 500;
-        }
-        #chat-box { 
-            padding: 1.5em;
-            min-height: 200px; 
-            max-height: 400px;
-            overflow-y: auto;
-            white-space: pre-wrap;
-            line-height: 1.6;
-            font-family: 'Segoe UI', system-ui, sans-serif;
-        }
-        .message {
-            margin-bottom: 1em;
-            padding: 0.75em;
-            border-radius: 8px;
-        }
-        .user-message {
-            background: #e3f2fd;
-            margin-left: 2em;
-            border-left: 4px solid #2196F3;
-        }
-        .assistant-message {
-            background: #f1f8e9;
-            margin-right: 2em;
-            border-left: 4px solid #4CAF50;
-            transition: all 0.3s ease;
-        }
-        
-        /* Tone-based styling */
-        .assistant-message.tone-friendly {
-            background: #e8f5e8;
-            border-left-color: #4CAF50;
-        }
-        
-        .assistant-message.tone-professional {
-            background: #f0f4ff;
-            border-left-color: #2196F3;
-        }
-        
-        .assistant-message.tone-empathetic {
-            background: #fff3e0;
-            border-left-color: #FF9800;
-        }
-        
-        .assistant-message.tone-enthusiastic {
-            background: #fff8e1;
-            border-left-color: #FFC107;
-        }
-        
-        .assistant-message.tone-analytical {
-            background: #f3e5f5;
-            border-left-color: #9C27B0;
-        }
-        
-        .assistant-message.tone-supportive {
-            background: #e1f5fe;
-            border-left-color: #00BCD4;
-        }
-        
-        .assistant-message.tone-humorous {
-            background: #ffe0f0;
-            border-left-color: #E91E63;
-        }
-        .clear-button {
-            margin-top: 1em;
-            padding: 0.5em 1em;
-            background: #f44336;
-            color: white;
-            border: none;
-            border-radius: 4px;
-            cursor: pointer;
-        }
-        .clear-button:hover {
-            background: #d32f2f;
-        }
-    </style>
+    <link rel="stylesheet" href="/static/styles.css">
 </head>
 <body>
-    <div class="header">
-        <img src="/static/images/carlos_logo.png" alt="Carlos Logo" class="logo">
-        <h1>Carlos AI Assistant</h1>
-    </div>
-    
-    <div class="chat-container">
-        <div class="input-area">
-            <div class="input-group">
-                <textarea id="promptInput" placeholder="Ask Carlos anything..."></textarea>
-                <button id="sendButton">Send</button>
+    <div class="app-container">
+        <div class="header">
+            <img src="/static/images/carlos_logo.png" alt="Carlos Logo" class="logo">
+            <h1>Carlos AI Assistant</h1>
+            <div class="user-info">
+                {% if username %}
+                <span class="username">{{ username }}</span>
+                <a href="/logout" class="logout-button">Logout</a>
+                {% endif %}
             </div>
+            <button id="clearButton" class="clear-button">Clear</button>
         </div>
         
-        <div id="statusArea" class="status-area">
-            <div class="stage-indicator">
-                <div class="stage-icon" id="stageIcon">🤔</div>
-                <div class="stage-text" id="stageText">Carlos is thinking...</div>
+        <div class="chat-container">
+            <div class="messages-area">
+                <div id="chat-box"></div>
+                
+                <div id="statusArea" class="status-area">
+                    <div class="stage-indicator">
+                        <div class="stage-icon" id="stageIcon">🤔</div>
+                        <div class="stage-text" id="stageText">Carlos is thinking...</div>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="input-area">
+                <div class="input-group">
+                    <textarea id="promptInput" placeholder="Message Carlos..."></textarea>
+                    <button id="sendButton">Send</button>
+                </div>
             </div>
         </div>
-        
-        <div id="chat-box"></div>
-        
-        <button id="clearButton" class="clear-button">Clear Conversation</button>
     </div>
 
     <script>
@@ -218,6 +52,7 @@
         let eventSource;
         let currentAssistantMessage = '';
         let currentAssistantMessageElement = null;
+        let messageSequence = []; // Track sequence of content (text/emotes)
 
         // Stage configuration with icons and messages
         const stages = {
@@ -231,9 +66,58 @@
 
         function addMessage(content, isUser = false) {
             const messageDiv = document.createElement('div');
-            messageDiv.className = `message ${isUser ? 'user-message' : 'assistant-message'}`;
+            messageDiv.className = `message ${isUser ? 'user-message' : 'assistant-message'}`;            
             messageDiv.textContent = content;
             chatBox.appendChild(messageDiv);
+            chatBox.scrollTop = chatBox.scrollHeight;
+        }
+
+        function addEmote(emoteText) {
+            const emoteDiv = document.createElement('div');
+            emoteDiv.className = 'emote';
+            emoteDiv.textContent = `*${emoteText}*`;
+            chatBox.appendChild(emoteDiv);
+            chatBox.scrollTop = chatBox.scrollHeight;
+        }
+
+        function renderMessageSequence() {
+            if (!currentAssistantMessageElement) return;
+            
+            // Clear current content
+            currentAssistantMessageElement.innerHTML = '';
+            
+            // Render each item in sequence
+            messageSequence.forEach((item, index) => {
+                if (item.type === 'text') {
+                    // Split text by lines and create text nodes with line breaks
+                    const lines = item.content.split('\n');
+                    lines.forEach((line, lineIndex) => {
+                        if (lineIndex > 0) {
+                            currentAssistantMessageElement.appendChild(document.createElement('br'));
+                        }
+                        if (line) {
+                            const textNode = document.createTextNode(line);
+                            currentAssistantMessageElement.appendChild(textNode);
+                        }
+                    });
+                } else if (item.type === 'emote') {
+                    // Add line break before emote if there's content before it
+                    if (index > 0) {
+                        currentAssistantMessageElement.appendChild(document.createElement('br'));
+                    }
+                    
+                    const emoteDiv = document.createElement('div');
+                    emoteDiv.className = 'emote-inline-block';
+                    emoteDiv.textContent = `*${item.content}*`;
+                    currentAssistantMessageElement.appendChild(emoteDiv);
+                    
+                    // Add line break after emote if there's more content coming
+                    if (index < messageSequence.length - 1) {
+                        currentAssistantMessageElement.appendChild(document.createElement('br'));
+                    }
+                }
+            });
+            
             chatBox.scrollTop = chatBox.scrollHeight;
         }
 
@@ -251,7 +135,7 @@
         function sendMessage() {
             const prompt = promptInput.value.trim();
             if (!prompt) {
-                alert("Please enter a message!");
+                // alert("Please enter a message!");
                 return;
             }
 
@@ -267,6 +151,7 @@
             promptInput.value = '';
             sendButton.disabled = true;
             currentAssistantMessage = '';
+            messageSequence = []; // Reset message sequence
 
             // Show initial status
             updateStage('default');
@@ -284,37 +169,45 @@
                         sendButton.disabled = false;
                         hideStatus();
                         
-                        // Add final assistant message if we have accumulated text
-                        if (currentAssistantMessage.trim() && !currentAssistantMessageElement) {
-                            addMessage(currentAssistantMessage);
-                        }
+                        // Clean up
                         currentAssistantMessage = '';
                         currentAssistantMessageElement = null;
+                        messageSequence = [];
+                        
+                    } else if (data.status === 'emote') {
+                        // Add emote to sequence
+                        messageSequence.push({ type: 'emote', content: data.message });
+                        
+                        // Ensure we have an assistant message element
+                        if (!currentAssistantMessageElement) {
+                            currentAssistantMessageElement = document.createElement('div');
+                            currentAssistantMessageElement.className = 'message assistant-message';
+                            chatBox.appendChild(currentAssistantMessageElement);
+                        }
+                        
+                        renderMessageSequence();
                         
                     } else if (data.status === "response") {
-                        // Accumulate response text
+                        // Add response text to sequence
+                        if (messageSequence.length > 0 && messageSequence[messageSequence.length - 1].type === 'text') {
+                            // Append to existing text item
+                            messageSequence[messageSequence.length - 1].content += data.message;
+                        } else {
+                            // Create new text item
+                            messageSequence.push({ type: 'text', content: data.message });
+                        }
+                        
                         currentAssistantMessage += data.message;
                         updateStage('response', 'Streaming response...');
                         
                         // Update the last assistant message or create one
                         if (!currentAssistantMessageElement) {
-                            // Create new assistant message
                             currentAssistantMessageElement = document.createElement('div');
                             currentAssistantMessageElement.className = 'message assistant-message';
-                            currentAssistantMessageElement.textContent = currentAssistantMessage;
                             chatBox.appendChild(currentAssistantMessageElement);
-                        } else {
-                            // Update existing assistant message
-                            currentAssistantMessageElement.textContent = currentAssistantMessage;
-                        }
-                        chatBox.scrollTop = chatBox.scrollHeight;
-                        
-                    } else if (data.status === "tone") {
-                        // Apply tone-based styling to the current message
-                        if (currentAssistantMessageElement && data.message) {
-                            currentAssistantMessageElement.classList.add(`tone-${data.message.toLowerCase()}`);
                         }
                         
+                        renderMessageSequence();
                     } else if (data.status === "error") {
                         // Handle server errors
                         addMessage(`❌ Error: ${data.message}`, false);
@@ -363,6 +256,7 @@
                 hideStatus();
                 currentAssistantMessage = '';
                 currentAssistantMessageElement = null;
+                messageSequence = [];
             };
             
             eventSource.onopen = function(event) {
@@ -390,6 +284,7 @@
                 hideStatus();
                 currentAssistantMessage = '';
                 currentAssistantMessageElement = null;
+                messageSequence = [];
             }
         });
 

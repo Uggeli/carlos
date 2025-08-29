@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Carlos AI Assistant - Login</title>
+    <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+    <div class="login-container">
+        <div class="login-card">
+            <div class="login-header">
+                <img src="/static/images/carlos_logo.png" alt="Carlos Logo" class="login-logo">
+                <h1>Welcome to Carlos</h1>
+                <p class="login-subtitle">Enter your username to access your personal AI assistant</p>
+            </div>
+            
+            <form class="login-form" method="POST" action="/login">
+                {% if error %}
+                <div class="error-message">
+                    {{ error }}
+                </div>
+                {% endif %}
+                
+                <div class="input-group">
+                    <label for="username">Username</label>
+                    <input type="text" id="username" name="username" placeholder="Enter your username" required autofocus>
+                </div>
+                
+                <button type="submit" class="login-button">
+                    <span>Start Chat</span>
+                    <div class="button-icon">→</div>
+                </button>
+            </form>
+            
+            <div class="login-info">
+                <p>Your username will be used to create a personalized Carlos instance with your own memory and conversation history.</p>
+            </div>
+        </div>
+        
+        <div class="login-footer">
+            <p>Carlos AI Assistant - Recursive Shard Architecture</p>
+        </div>
+    </div>
+
+    <script>
+        // Focus on username input when page loads
+        window.addEventListener('load', function() {
+            document.getElementById('username').focus();
+        });
+
+        // Handle form submission
+        document.querySelector('.login-form').addEventListener('submit', function(e) {
+            const username = document.getElementById('username').value.trim();
+            
+            // Basic validation
+            if (!username) {
+                e.preventDefault();
+                alert('Please enter a username');
+                return;
+            }
+            
+            // Optional: validate username format
+            if (!/^[a-zA-Z0-9_-]+$/.test(username)) {
+                e.preventDefault();
+                alert('Username can only contain letters, numbers, hyphens, and underscores');
+                return;
+            }
+            
+            if (username.length < 2 || username.length > 50) {
+                e.preventDefault();
+                alert('Username must be between 2 and 50 characters');
+                return;
+            }
+        });
+    </script>
+</body>
+</html>
