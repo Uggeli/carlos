@@ -7,6 +7,12 @@ import os
 import json
 from typing import Optional, Dict, Any, List
 import logging
+
+# Configure logging
+logging.basicConfig(
+    level=logging.DEBUG,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
 logger = logging.getLogger(__name__)
 
 class MongoJSONEncoder(json.JSONEncoder):
@@ -94,9 +100,6 @@ class WebSearchAgent(LlmAgent):
         self.system_prompt = system_prompt
         self.schema = schema
         
-
-
-
     async def run(self, query: str) -> dict:
         pass
 
@@ -426,6 +429,9 @@ class CarlosDatabaseHandler:
             }
         ]
         results = list(self.interactions_col.aggregate(pipeline))
+        if not results:
+            # lets try user messages only
+            results = list(self.messages_col.find({"tags": {"$in": tags}}).sort("timestamp", -1).limit(top_k))
         return results
     
     def search_by_tags(self, tags: list[str], time_filter:str='', top_k: int = 5) -> list[dict]:
@@ -434,9 +440,10 @@ class CarlosDatabaseHandler:
             "tags": {"$in": tags}
         }
         results = list(self.interactions_col.find(query).sort("timestamp", -1).limit(top_k))
+        if not results:
+            results = list(self.messages_col.find(query).sort("timestamp", -1).limit(top_k))
         return results
      
-
 class Carlos:
     """Main class for handling user interactions and coordinating agents."""
     def __init__(self, api_endpoint: str, db_uri: str, user_name: str):
@@ -677,10 +684,10 @@ class Carlos:
         query_vector = await self._fetch_embeddings(summary)
         search_results = self.db_handler.search(tags, query_vector, time_filter='', top_k=5)
         logger.debug(f"Initial search results: {search_results}")
-        max_thinker_loops = 5
+        max_thinker_loops = 15
         thinker_loop = 0
         thinker_context = {
-            "search_results": [],
+            "search_results": search_results,
             "reasoning": [],
             "summary": summary,
             "tags": tags

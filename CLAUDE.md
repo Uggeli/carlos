@@ -28,15 +28,21 @@ python reset_db.py --all
 
 # List existing databases
 python reset_db.py --list
+
+# Reset collections only (preserve database)
+python reset_db.py --collections username
 ```
 
 ### Running the Application
 ```bash
-# Development mode (recommended)
+# FastAPI development mode (recommended)
+uvicorn app:app --reload
+
+# Alternative: Direct Python execution
 python app.py
 
-# With environment variables
-$env:FLASK_APP = "app.py"; $env:FLASK_ENV = "development"; python app.py
+# Install FastAPI dependencies if needed
+pip install fastapi "uvicorn[standard]"
 ```
 
 ### Testing and Debugging
@@ -108,9 +114,10 @@ Carlos implements a **"Shards of Thought"** framework that solves the stability-
 - `EMBEDDINGS_MODEL`: Embedding model (default: text-embedding-nomic-embed-text-v1.5)
 
 **API Endpoints (`app.py`):**
-- `GET /`: Main chat interface
-- `POST /stream`: Streaming response endpoint with event-source
-- Single Carlos instance per application (stored in `CARLOS_INSTANCES`)
+- `GET /`: Main chat interface (FastAPI/Jinja2 templates)
+- `GET /stream`: Streaming response endpoint with event-source
+- `GET /favicon.ico`: Favicon serving endpoint
+- Single Carlos instance per application initialized with test_user
 
 ### Key Implementation Details
 
@@ -135,9 +142,10 @@ Carlos implements a **"Shards of Thought"** framework that solves the stability-
 ## File Structure
 
 **Core Implementation:**
-- `carlos.py`: Main AI pipeline with all agent classes and database handler
-- `app.py`: Flask web server with streaming endpoint
-- `requirements.txt`: Python dependencies (Flask, PyMongo, httpx, requests)
+- `carlos.py`: Main AI pipeline with LlmAgent classes and multi-agent architecture
+- `app.py`: FastAPI web server with streaming endpoint and template rendering
+- `requirements.txt`: Python dependencies (flask, pymongo, httpx, requests)
+- `reset_db.py`: Database management utility with user-specific and bulk operations
 
 **Configuration Files:**
 - `prompts/`: System prompts for each agent (curator, thinker, response_generator, summarizer)  
@@ -145,12 +153,14 @@ Carlos implements a **"Shards of Thought"** framework that solves the stability-
 - `docker-compose.yml`: MongoDB container setup
 
 **Web Interface:**
-- `templates/index.html`: Basic chat interface with EventSource streaming
-- `static/`: CSS styles and images (carlos_logo.png, favicon.png)
+- `templates/index.html`: Chat interface with EventSource streaming support
+- `templates/login.html`: User login interface
+- `static/styles.css`: Application styling
+- `static/images/`: Assets including carlos_logo.png and favicon.png
 
 **Development Tools:**
 - `reset_db.py`: Database management script with user-specific resets
-- `docs/`: Architecture documentation and development guides
+- `docs/ArchitechturePlans.md`: Comprehensive theoretical framework and "Shards of Thought" cognitive architecture analysis
 
 ## Development Notes
 
@@ -165,3 +175,11 @@ The thinker agent performs iterative reasoning until it determines sufficient co
 
 **User-Specific Databases:**
 Each user gets their own MongoDB database (`carlos_{username}`) enabling personalized memory and context.
+
+**Framework Evolution:**
+The architecture implements a "Recursive Shard Architecture" solving the stability-plasticity dilemma by separating:
+- Plasticity (Database): Factual, semantic, episodic memory - allows continuous learning
+- Stability (Network): Procedural, conceptual knowledge - maintains stable reasoning patterns
+
+**LlmAgent Base Class:**
+All agents inherit from `LlmAgent` providing consistent async HTTP client patterns with httpx, schema-driven JSON responses, and streaming support.

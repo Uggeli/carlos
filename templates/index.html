@@ -49,7 +49,6 @@
         const stageText = document.getElementById('stageText');
         const clearButton = document.getElementById('clearButton');
 
-        let eventSource;
         let currentAssistantMessage = '';
         let currentAssistantMessageElement = null;
         let messageSequence = []; // Track sequence of content (text/emotes)
@@ -142,10 +141,7 @@
             // Add user message to chat
             addMessage(prompt, true);
 
-            // Close any existing connection
-            if (eventSource) {
-                eventSource.close();
-            }
+            // Note: No need to close connections with fetch streams
 
             // Clear input and disable send button
             promptInput.value = '';
@@ -156,23 +152,66 @@
             // Show initial status
             updateStage('default');
 
-            // Create EventSource connection
-            eventSource = new EventSource(`/stream?prompt=${encodeURIComponent(prompt)}`);
-
-            eventSource.onmessage = function(event) {
-                try {
-                    const data = JSON.parse(event.data);
-                    console.log("Received data:", data);
-
-                    if (data.status === "[DONE]") {
-                        eventSource.close();
-                        sendButton.disabled = false;
-                        hideStatus();
+            // Create fetch stream connection
+            fetch('/stream', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({ prompt: prompt })
+            }).then(response => {
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+                const reader = response.body.getReader();
+                const decoder = new TextDecoder();
+                
+                function processStream() {
+                    return reader.read().then(({ done, value }) => {
+                        if (done) {
+                            sendButton.disabled = false;
+                            hideStatus();
+                            currentAssistantMessage = '';
+                            currentAssistantMessageElement = null;
+                            messageSequence = [];
+                            return;
+                        }
                         
-                        // Clean up
-                        currentAssistantMessage = '';
-                        currentAssistantMessageElement = null;
-                        messageSequence = [];
+                        const chunk = decoder.decode(value);
+                        const lines = chunk.split('\n');
+                        
+                        for (let line of lines) {
+                            if (line.startsWith('data: ')) {
+                                try {
+                                    const data = JSON.parse(line.slice(6));
+                                    handleStreamData(data);
+                                } catch (e) {
+                                    console.error("Error parsing stream data:", e, line);
+                                }
+                            }
+                        }
+                        
+                        return processStream();
+                    });
+                }
+                
+                return processStream();
+            }).catch(error => {
+                console.error("Fetch stream failed:", error);
+                addMessage("❌ Connection error. Please try again.", false);
+                sendButton.disabled = false;
+                hideStatus();
+                currentAssistantMessage = '';
+                currentAssistantMessageElement = null;
+                messageSequence = [];
+            });
+
+            function handleStreamData(data) {
+                console.log("Received data:", data);
+
+                if (data.status === "[DONE]") {
+                        // Stream is done - cleanup handled by processStream
+                        return;
                         
                     } else if (data.status === 'emote') {
                         // Add emote to sequence
@@ -211,7 +250,6 @@
                     } else if (data.status === "error") {
                         // Handle server errors
                         addMessage(`❌ Error: ${data.message}`, false);
-                        eventSource.close();
                         sendButton.disabled = false;
                         hideStatus();
                         
@@ -219,49 +257,7 @@
                         // Handle other stages (chunking, embedding, searching, thinking)
                         updateStage(data.status, data.message);
                     }
-                } catch (e) {
-                    console.error("Error parsing event data:", e);
-                    console.log("Raw event data:", event.data);
-                    
-                    // Fallback: treat as plain text response
-                    if (event.data && event.data !== "[DONE]") {
-                        currentAssistantMessage += event.data;
-                        updateStage('response');
-                        
-                        let lastMessage = chatBox.lastElementChild;
-                        if (!lastMessage || lastMessage.classList.contains('user-message')) {
-                            const messageDiv = document.createElement('div');
-                            messageDiv.className = 'message assistant-message';
-                            messageDiv.textContent = currentAssistantMessage;
-                            chatBox.appendChild(messageDiv);
-                        } else {
-                            lastMessage.textContent = currentAssistantMessage;
-                        }
-                        chatBox.scrollTop = chatBox.scrollHeight;
-                    }
-                }
-            };
-
-            eventSource.onerror = function(err) {
-                console.error("EventSource failed:", err);
-                console.log("EventSource readyState:", eventSource.readyState);
-                
-                // Only show error if not already closed
-                if (eventSource.readyState !== EventSource.CLOSED) {
-                    addMessage("❌ Connection error. Please try again.", false);
-                }
-                
-                eventSource.close();
-                sendButton.disabled = false;
-                hideStatus();
-                currentAssistantMessage = '';
-                currentAssistantMessageElement = null;
-                messageSequence = [];
-            };
-            
-            eventSource.onopen = function(event) {
-                console.log("EventSource connection opened");
-            };
+            }
         }
 
         // Event listeners
@@ -277,9 +273,6 @@
         clearButton.addEventListener('click', function() {
             if (confirm('Clear the conversation?')) {
                 chatBox.innerHTML = '';
-                if (eventSource) {
-                    eventSource.close();
-                }
                 sendButton.disabled = false;
                 hideStatus();
                 currentAssistantMessage = '';

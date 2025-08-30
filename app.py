@@ -1,16 +1,22 @@
 
 import json
+import logging
 from fastapi import FastAPI, Request
 from fastapi.responses import StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 import carlos
-# Assuming 'carlos_instance' is initialized somewhere, just like in your Flask app
-# from your_code import carlos_instance 
+
+# Configure logging for FastAPI
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger(__name__)
 
 carlos_instance = carlos.Carlos(
 	api_endpoint="http://localhost:1234",
-	db_uri="mongodb://localhost:27017",  
+	db_uri="mongodb://localhost:27017/carlos",  
 	user_name="test_user"
 	)
 
@@ -42,12 +48,24 @@ async def stream_generator(prompt: str):
         # Handle errors gracefully
         yield f"data: {json.dumps({'status': 'error', 'message': str(e)})}\n\n"
 
-@app.get("/stream")
-async def stream(request: Request, prompt: str = "Default prompt"):
+@app.post("/stream")
+async def stream(request: Request):
     """
     The main endpoint that returns the streaming response.
     """
-    return StreamingResponse(stream_generator(prompt), media_type="text/event-stream")
+    try:
+        body = await request.json()
+        prompt = body.get("prompt", "Default prompt")
+        return StreamingResponse(stream_generator(prompt), media_type="text/event-stream")
+    except Exception as e:
+        return StreamingResponse(
+            stream_generator_error(f"Error parsing request: {str(e)}"), 
+            media_type="text/event-stream"
+        )
+
+async def stream_generator_error(error_msg: str):
+    """Generator for error responses."""
+    yield f"data: {json.dumps({'status': 'error', 'message': error_msg})}\n\n"
 
 # To run this:
 # 1. pip install fastapi "uvicorn[standard]"
